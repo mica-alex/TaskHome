@@ -1,0 +1,171 @@
+{% extends 'base.html' %}
+
+{% block title %}Tasks{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h4>Scheduled Tasks</h4>
+    <div class="row">
+        <div class="col s12">
+            <a class="waves-effect waves-light btn right modal-trigger" href="#add_task_modal"><i class="material-icons left">add</i>Add Task</a>
+            <table class="striped">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Next Time</th>
+                        <th>Recurring</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                    <tr>
+                        <td>{{ task.title }}</td>
+                        <td>{{ task.next_time }}</td>
+                        <td>{{ task.recurring }}</td>
+                        <td>
+                            <a class="btn-small waves-effect waves-light modal-trigger" href="#edit_task_{{ task.id }}"><i class="material-icons">edit</i></a>
+                            <form action="{{ url_for('delete_task') }}" method="POST" style="display:inline;">
+                                <input type="hidden" name="id" value="{{ task.id }}">
+                                <button type="submit" class="btn-small waves-effect waves-light red"><i class="material-icons">delete</i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <h4>Task History</h4>
+    <div class="row">
+        <div class="col s12">
+            <table class="striped">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Print Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr>
+                        <td>{{ item.title }}</td>
+                        <td>{{ item.print_time }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="add_task_modal" class="modal">
+        <div class="modal-content">
+            <h4>Add Task</h4>
+            <form action="{{ url_for('add_task') }}" method="POST">
+                <div class="input-field">
+                    <input id="title" type="text" name="title" required>
+                    <label for="title">Title</label>
+                </div>
+                <div class="input-field">
+                    <input id="next_time" type="text" name="next_time" class="datetimepicker">
+                    <label for="next_time">Next Time</label>
+                </div>
+                <div class="input-field">
+                    <textarea id="extra" name="extra" class="materialize-textarea"></textarea>
+                    <label for="extra">Extra Info</label>
+                </div>
+                <div class="input-field">
+                    <input id="url" type="text" name="url">
+                    <label for="url">URL</label>
+                </div>
+                <div class="input-field">
+                    <select name="recurring">
+                        <option value="none">None</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="every_weekday">Every Weekday</option>
+                        <option value="first_day_month">First Day of Month</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                    <label>Recurring</label>
+                </div>
+                <div id="custom_days" style="display:none;">
+                    <p>Repeat on:</p>
+                    <p>
+                        <label><input type="checkbox" name="days" value="0"><span>Mon</span></label>
+                        <label><input type="checkbox" name="days" value="1"><span>Tue</span></label>
+                        <label><input type="checkbox" name="days" value="2"><span>Wed</span></label>
+                        <label><input type="checkbox" name="days" value="3"><span>Thu</span></label>
+                        <label><input type="checkbox" name="days" value="4"><span>Fri</span></label>
+                        <label><input type="checkbox" name="days" value="5"><span>Sat</span></label>
+                        <label><input type="checkbox" name="days" value="6"><span>Sun</span></label>
+                    </p>
+                </div>
+                <p>
+                    <label><input type="checkbox" name="enabled" checked><span>Enabled</span></label>
+                </p>
+                <button type="submit" class="btn waves-effect waves-light"><i class="material-icons left">add</i>Add</button>
+                <a href="#!" class="modal-close btn-flat">Cancel</a>
+            </form>
+        </div>
+    </div>
+
+    {% for task in tasks %}
+    <div id="edit_task_{{ task.id }}" class="modal">
+        <div class="modal-content">
+            <h4>Edit Task</h4>
+            <form action="{{ url_for('edit_task', task_id=task.id) }}" method="POST">
+                <div class="input-field">
+                    <input id="title_{{ task.id }}" type="text" name="title" value="{{ task.title }}" required>
+                    <label for="title_{{ task.id }}">Title</label>
+                </div>
+                <div class="input-field">
+                    <input id="next_time_{{ task.id }}" type="text" name="next_time" value="{{ task.next_time }}" class="datetimepicker">
+                    <label for="next_time_{{ task.id }}">Next Time</label>
+                </div>
+                <div class="input-field">
+                    <textarea id="extra_{{ task.id }}" name="extra" class="materialize-textarea">{{ task.extra if task.extra else '' }}</textarea>
+                    <label for="extra_{{ task.id }}">Extra Info</label>
+                </div>
+                <div class="input-field">
+                    <input id="url_{{ task.id }}" type="text" name="url" value="{{ task.url if task.url else '' }}">
+                    <label for="url_{{ task.id }}">URL</label>
+                </div>
+                <div class="input-field">
+                    <select name="recurring">
+                        <option value="none" {{ 'selected' if task.recurring == 'none' }}>None</option>
+                        <option value="daily" {{ 'selected' if task.recurring == 'daily' }}>Daily</option>
+                        <option value="weekly" {{ 'selected' if task.recurring == 'weekly' }}>Weekly</option>
+                        <option value="monthly" {{ 'selected' if task.recurring == 'monthly' }}>Monthly</option>
+                        <option value="every_weekday" {{ 'selected' if task.recurring == 'every_weekday' }}>Every Weekday</option>
+                        <option value="first_day_month" {{ 'selected' if task.recurring == 'first_day_month' }}>First Day of Month</option>
+                        <option value="custom" {{ 'selected' if task.recurring == 'custom' }}>Custom</option>
+                    </select>
+                    <label>Recurring</label>
+                </div>
+                <div id="custom_days_{{ task.id }}" style="display:{{ 'block' if task.recurring == 'custom' else 'none' }};">
+                    <p>Repeat on:</p>
+                    <p>
+                        <label><input type="checkbox" name="days" value="0" {{ 'checked' if task.days and 0 in task.days }}><span>Mon</span></label>
+                        <label><input type="checkbox" name="days" value="1" {{ 'checked' if task.days and 1 in task.days }}><span>Tue</span></label>
+                        <label><input type="checkbox" name="days" value="2" {{ 'checked' if task.days and 2 in task.days }}><span>Wed</span></label>
+                        <label><input type="checkbox" name="days" value="3" {{ 'checked' if task.days and 3 in task.days }}><span>Thu</span></label>
+                        <label><input type="checkbox" name="days" value="4" {{ 'checked' if task.days and 4 in task.days }}><span>Fri</span></label>
+                        <label><input type="checkbox" name="days" value="5" {{ 'checked' if task.days and 5 in task.days }}><span>Sat</span></label>
+                        <label><input type="checkbox" name="days" value="6" {{ 'checked' if task.days and 6 in task.days }}><span>Sun</span></label>
+                    </p>
+                </div>
+                <p>
+                    <label><input type="checkbox" name="enabled" {{ 'checked' if task.enabled }}><span>Enabled</span></label>
+                </p>
+                <button type="submit" class="btn waves-effect waves-light"><i class="material-icons left">save</i>Save</button>
+                <a href="#!" class="modal-close btn-flat">Cancel</a>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

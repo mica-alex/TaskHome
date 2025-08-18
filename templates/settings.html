@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="section">
+        <h2>Settings</h2>
+        <div class="card">
+            <div class="card-content">
+                <form action="{{ url_for('settings') }}" method="post">
+                    <div class="input-field">
+                        <input id="max_history" name="max_history" type="number" min="1" step="1" pattern="[0-9]*" value="{{ config.max_history }}" required aria-required="true">
+                        <label for="max_history">Max History</label>
+                    </div>
+                    <div class="input-field">
+                        <input id="hostname" name="hostname" type="text" value="{{ config.hostname }}" required aria-required="true">
+                        <label for="hostname">Hostname</label>
+                    </div>
+                    <div class="input-field">
+                        <select id="theme" name="theme" aria-label="Theme selection">
+                            <option value="system" {% if config.theme == 'system' %}selected{% endif %}>Match System</option>
+                            <option value="light" {% if config.theme == 'light' %}selected{% endif %}>Light</option>
+                            <option value="dark" {% if config.theme == 'dark' %}selected{% endif %}>Dark</option>
+                        </select>
+                        <label for="theme">Theme</label>
+                    </div>
+                    <button class="btn waves-effect waves-light" type="submit" aria-label="Save settings">
+                        Save Settings
+                        <i class="material-icons right">save</i>
+                    </button>
+                    <button class="btn-flat waves-effect" type="submit" name="clear_history" aria-label="Clear task history">
+                        Clear History
+                        <i class="material-icons right">delete_sweep</i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Connected Hardware</h2>
+        <div class="card">
+            <div class="card-content">
+                <p><strong>Manufacturer:</strong> {{ printer_info.manufacturer }}</p>
+                <p><strong>Model:</strong> {{ printer_info.model }}</p>
+                <p><strong>Connection:</strong> {{ printer_info.connection }}</p>
+                <p><strong>Status:</strong> {{ printer_info.status }}</p>
+                <form action="{{ url_for('test_print') }}" method="post" style="margin-top: 20px;">
+                    <button class="btn waves-effect waves-light" type="submit" aria-label="Test printer connection">
+                        Test Print
+                        <i class="material-icons right">print</i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Initialize Materialize select -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Initializing Materialize selects');
+            var selects = document.querySelectorAll('select');
+            M.FormSelect.init(selects, {
+                onOpenStart: function() { console.log('Select opened'); },
+                onCloseEnd: function() { console.log('Select closed'); }
+            });
+        });
+    </script>
+</div>
+{% endblock %}

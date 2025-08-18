@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="section">
+        <h1>Welcome to TaskHome</h1>
+        <p><strong>Printer Status:</strong> {{ status }}</p>
+    </div>
+
+    <div class="section">
+        <h2>Scheduled Tasks</h2>
+        <table class="striped responsive-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Next Time</th>
+                    <th>Recurring</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td>{{ task.title }}</td>
+                    <td>{{ task.next_time }}</td>
+                    <td>{{ task.recurring }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <a href="{{ url_for('task_page') }}" class="btn waves-effect waves-light" aria-label="Go to tasks page" style="margin-top: 20px;">
+            Manage Tasks
+            <i class="material-icons right">arrow_forward</i>
+        </a>
+    </div>
+
+    <div class="section">
+        <h2>Last 5 Task Prints</h2>
+        <table class="striped responsive-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Print Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in history %}
+                <tr id="{{ item.id }}">
+                    <td>{{ item.title }}</td>
+                    <td>{{ item.print_time }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
