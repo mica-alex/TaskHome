@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}Listeners{% endblock %}
+
+{% block content %}
+
+    <h5>SeeClickFix Listener Settings</h5>
+
+    <div class="card">
+        <div class="card-content">
+            <form method="POST">
+                <div class="input-field">
+                    <p>
+                        <label>
+                            <input type="checkbox" name="enabled" {% if scf.enabled %}checked{% endif %}/>
+                            <span>Enabled</span>
+                        </label>
+                    </p>
+                </div>
+
+                <div class="input-field">
+                    <input id="request_types" name="request_types" type="text" value="{{ scf.request_types or '6632,6634' }}" required>
+                    <label for="request_types">Request Type IDs (comma-delimited, e.g., 6632,6634)</label>
+                </div>
+
+                <div class="input-field">
+                    <input id="interval" name="interval" type="number" value="{{ scf.interval or 10 }}">
+                    <label for="interval">Check Interval (minutes)</label>
+                </div>
+
+                <button class="btn waves-effect waves-light" type="submit">Save
+                    <i class="material-icons right">save</i>
+                </button>
+            </form>
+        </div>
+    </div>
+
+{% endblock %}

@@ -3,56 +3,65 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
-<div class="container">
-    <div class="section">
-        <h1>Welcome to TaskHome</h1>
-        <p><strong>Printer Status:</strong> {{ status }}</p>
+
+    <div class="card">
+        <div class="card-content">
+            <span class="card-title">Welcome to TaskHome</span>
+            <p>Printer Status: {{ status }}</p>
+        </div>
     </div>
 
-    <div class="section">
-        <h2>Scheduled Tasks</h2>
-        <table class="striped responsive-table">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Next Time</th>
-                    <th>Recurring</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for task in tasks %}
-                <tr>
-                    <td>{{ task.title }}</td>
-                    <td>{{ task.next_time }}</td>
-                    <td>{{ task.recurring }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <a href="{{ url_for('task_page') }}" class="btn waves-effect waves-light" aria-label="Go to tasks page" style="margin-top: 20px;">
-            Manage Tasks
-            <i class="material-icons right">arrow_forward</i>
-        </a>
+    <div class="card">
+        <div class="card-content">
+            <span class="card-title">Scheduled Tasks</span>
+            <table class="striped">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Next Time</th>
+                        <th>Recurring</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                    <tr>
+                        <td>{{ task.title }}</td>
+                        <td>{{ task.next_time }}</td>
+                        <td>{{ task.recurring }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="card-action">
+                <a href="/task_page">Manage Tasks <i class="material-icons right">arrow_forward</i></a>
+            </div>
+        </div>
     </div>
 
-    <div class="section">
-        <h2>Last 5 Task Prints</h2>
-        <table class="striped responsive-table">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Print Time</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in history %}
-                <tr id="{{ item.id }}">
-                    <td>{{ item.title }}</td>
-                    <td>{{ item.print_time }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div class="card">
+        <div class="card-content">
+            <span class="card-title">Last 5 Prints</span>
+            <table class="striped">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Print Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr>
+                        {% if item.type == 'scf' %}
+                            <td>SCF: {{ item.category }} {% if item.summary %} - {{ item.id }}{% endif %}</td>
+                        {% else %}
+                            <td>{{ item.title }}</td>
+                        {% endif %}
+                        <td>{{ item.print_time }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
+
 {% endblock %}
