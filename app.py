@@ -343,7 +343,7 @@ def scheduler_loop():
                             issues_url = "https://seeclickfix.com/api/v2/issues"
                             print(f"Fetching SCF issues after {after} with params: {params}")
                             app.logger.info(f"Fetching SCF issues after {after} with params: {params}")
-                            resp = requests.get(issues_url, params=params)
+                            resp = requests.get(issues_url, params=params, timeout=10)
                             resp.raise_for_status()
                             data = resp.json()
                             issues = data.get('issues',
