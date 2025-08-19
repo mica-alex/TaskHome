@@ -22,7 +22,6 @@ logging.basicConfig(
         logging.FileHandler('app.log')
     ]
 )
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -47,60 +46,60 @@ listeners = {}  # New: e.g., {'scf': {'enabled': False, 'request_types': '6632,6
 
 def load_data():
     global config, tasks, history, listeners
-    logger.debug("Entering load_data")
+    app.logger.debug("Entering load_data")
     try:
         config_path = os.path.abspath(CONFIG_FILE)
         tasks_path = os.path.abspath(TASKS_FILE)
         history_path = os.path.abspath(HISTORY_FILE)
         listeners_path = os.path.abspath(LISTENERS_FILE)  # New
 
-        logger.debug(f"Checking config file: {config_path}")
+        app.logger.debug(f"Checking config file: {config_path}")
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 config = json.load(f)
-                logger.debug(f"Loaded config: {config}")
+                app.logger.debug(f"Loaded config: {config}")
                 if config.get('theme') == 'high-contrast':
                     config['theme'] = 'system'
-                    logger.debug("Converted high-contrast theme to system")
+                    app.logger.debug("Converted high-contrast theme to system")
         else:
-            logger.warning(f"Config file not found: {config_path}")
+            app.logger.warning(f"Config file not found: {config_path}")
 
-        logger.debug(f"Checking tasks file: {tasks_path}")
+        app.logger.debug(f"Checking tasks file: {tasks_path}")
         if os.path.exists(tasks_path):
             with open(tasks_path, 'r') as f:
                 tasks = json.load(f)
-                logger.debug(f"Loaded tasks: {tasks}")
+                app.logger.debug(f"Loaded tasks: {tasks}")
                 for task in tasks:
                     if 'enabled' not in task:
                         task['enabled'] = True
-                        logger.debug(f"Added 'enabled' to task: {task}")
+                        app.logger.debug(f"Added 'enabled' to task: {task}")
         else:
-            logger.warning(f"Tasks file not found: {tasks_path}")
+            app.logger.warning(f"Tasks file not found: {tasks_path}")
 
-        logger.debug(f"Checking history file: {history_path}")
+        app.logger.debug(f"Checking history file: {history_path}")
         if os.path.exists(history_path):
             with open(history_path, 'r') as f:
                 history = json.load(f)
-                logger.debug(f"Loaded history: {history}")
+                app.logger.debug(f"Loaded history: {history}")
                 for item in history:  # Add type to existing history if missing
                     if 'type' not in item:
                         item['type'] = 'task'
         else:
-            logger.warning(f"History file not found: {history_path}")
+            app.logger.warning(f"History file not found: {history_path}")
 
         # New: Load listeners
-        logger.debug(f"Checking listeners file: {listeners_path}")
+        app.logger.debug(f"Checking listeners file: {listeners_path}")
         if os.path.exists(listeners_path):
             with open(listeners_path, 'r') as f:
                 listeners = json.load(f)
-                logger.debug(f"Loaded listeners: {listeners}")
+                app.logger.debug(f"Loaded listeners: {listeners}")
         else:
             listeners = {'scf': {'enabled': False, 'request_types': '6632,6634', 'interval': 10, 'last_check': None}}
             save_listeners()
-            logger.warning(f"Listeners file not found, created default: {listeners_path}")
+            app.logger.warning(f"Listeners file not found, created default: {listeners_path}")
     except Exception as e:
-        logger.error(f"Error in load_data: {e}", exc_info=True)
-    logger.debug("Exiting load_data")
+        app.logger.error(f"Error in load_data: {e}", exc_info=True)
+    app.logger.debug("Exiting load_data")
 
 
 def save_config():
@@ -128,7 +127,7 @@ def is_printer_connected():
         dev = usb.core.find(idVendor=VID, idProduct=PID)
         return dev is not None
     except Exception as e:
-        logger.error(f"USB detection error: {e}")
+        app.logger.error(f"USB detection error: {e}")
         return False
 
 
@@ -159,7 +158,7 @@ def calculate_next(next_time_str, recurring, days=None):
 
 def print_task(task):
     if not is_printer_connected():
-        logger.warning("Printer not connected, skipping print")
+        app.logger.warning("Printer not connected, skipping print")
         return
     try:
         p = Usb(VID, PID, profile='TM-T20II')
@@ -209,12 +208,12 @@ def print_task(task):
         history[:] = history[:config['max_history']]
         save_history()
     except Exception as e:
-        logger.error(f"Print error: {e}")
+        app.logger.error(f"Print error: {e}")
 
 
 def print_scf_issue(issue):  # New: Custom print for SCF issues
     if not is_printer_connected():
-        logger.warning("Printer not connected, skipping SCF issue print")
+        app.logger.warning("Printer not connected, skipping SCF issue print")
         return
     try:
         p = Usb(VID, PID, profile='TM-T20II')
@@ -277,7 +276,7 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         history[:] = history[:config['max_history']]
         save_history()
     except Exception as e:
-        logger.error(f"SCF issue print error: {e}")
+        app.logger.error(f"SCF issue print error: {e}")
 
 
 def scheduler_loop():
@@ -299,6 +298,8 @@ def scheduler_loop():
     save_tasks()
 
     while True:
+        print("Scheduler loop iteration started")
+        app.logger.debug("Scheduler loop iteration started")
         try:
             now = datetime.now()
             now_utc = datetime.now(timezone.utc)
@@ -318,6 +319,7 @@ def scheduler_loop():
             if 'scf' in listeners:
                 scf = listeners['scf']
                 if scf['enabled'] and scf.get('request_types', '').strip():
+                    print("Checking SCF listener...")
                     last_check = scf.get('last_check')
                     interval = timedelta(minutes=scf['interval'])
                     last_check_dt = None
@@ -330,7 +332,8 @@ def scheduler_loop():
                             if last_check_dt.tzinfo is None:
                                 last_check_dt = last_check_dt.replace(tzinfo=timezone.utc)
                         except ValueError as e:
-                            logger.warning(
+                            print(f"Failed to parse last_check '{last_check}': {e}, using one hour ago as fallback")
+                            app.logger.warning(
                                 f"Failed to parse last_check '{last_check}': {e}, using one hour ago as fallback")
                     if last_check_dt is None or (now_utc - last_check_dt) >= interval:
                         try:
@@ -348,6 +351,8 @@ def scheduler_loop():
                                 'per_page': '100'
                             }
                             issues_url = "https://seeclickfix.com/api/v2/issues"
+                            print(f"Fetching SCF issues after {after} with params: {params}")
+                            app.logger.info(f"Fetching SCF issues after {after} with params: {params}")
                             resp = requests.get(issues_url, params=params)
                             resp.raise_for_status()
                             data = resp.json()
@@ -361,16 +366,18 @@ def scheduler_loop():
                             # Update last_check with strict format
                             scf['last_check'] = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
                             save_listeners()
-                            logger.info(f"SCF listener checked at {scf['last_check']}, found {len(issues)} new issues")
+                            app.logger.info(f"SCF listener checked at {scf['last_check']}, found {len(issues)} new issues")
                         except Exception as e:
-                            logger.error(f"SCF listener error: {e}")
+                            print(f"SCF listener error: {e}")
+                            app.logger.error(f"SCF listener error: {e}")
                 elif scf['enabled'] and not scf.get('request_types', '').strip():
-                    logger.warning("SCF listener enabled but request_types empty; skipping check")
+                    print("SCF listener enabled but request_types empty; skipping check")
+                    app.logger.warning("SCF listener enabled but request_types empty; skipping check")
         except Exception as e:
-            logger.error(f"Scheduler loop error: {e}", exc_info=True)
+            app.logger.error(f"Scheduler loop error: {e}", exc_info=True)
 
         # Sleep for a minute before next check
-        logger.debug("Scheduler loop iteration complete, sleeping for 60 seconds")
+        app.logger.debug("Scheduler loop iteration complete, sleeping for 60 seconds")
         time.sleep(60)
 
 
@@ -430,7 +437,7 @@ def test_print():
         print_task(test_task)
         return 'Test print successful! <a href="/settings">Back</a>'
     except Exception as e:
-        logger.error(f"Test print error: {e}")
+        app.logger.error(f"Test print error: {e}")
         return f'Test print failed: {e}. <a href="/settings">Back</a>'
 
 
@@ -510,8 +517,8 @@ def listener():
 load_data()
 scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
 scheduler_thread.start()
-logger.debug("Initialization complete: Data loaded and scheduler started")
+app.logger.debug("Initialization complete: Data loaded and scheduler started")
 
 if __name__ == '__main__':
-    logger.debug("Running directly via python app.py")
+    app.logger.debug("Running directly via python app.py")
     app.run(host='0.0.0.0', port=PORT)
