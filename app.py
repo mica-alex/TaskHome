@@ -10,20 +10,10 @@ import usb.core
 from dateutil.relativedelta import relativedelta
 from escpos.printer import Usb
 from flask import Flask, render_template, request, redirect, url_for
-import logging
 import requests  # New import for API calls
 
-# Set up logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('app.log')
-    ]
-)
-
 app = Flask(__name__)
+app.logger.setLevel('DEBUG')  # Set to DEBUG for detailed logs
 
 # Constants
 PORT = 5000
