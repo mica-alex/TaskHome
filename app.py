@@ -122,6 +122,7 @@ def is_printer_connected():
 
 
 def calculate_next(next_time_str, recurring, days=None):
+    app.logger.debug(f"Calculating next time from {next_time_str} with recurring={recurring} and days={days}")
     next_time = datetime.fromisoformat(next_time_str)
     if recurring == 'daily':
         return (next_time + timedelta(days=1)).isoformat()
@@ -271,24 +272,22 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
 
 def scheduler_loop():
     # Handle missed tasks on startup
-    now = datetime.now()
-    for task in tasks[:]:
+    now = datetime.now(timezone.utc)  # Assuming times are in UTC
+    for task in tasks:
         if not task.get('enabled', True):
             continue
-        next_time = datetime.fromisoformat(task['next_time'])
-        if task['recurring'] == 'none':
-            if next_time <= now:
-                print_task(task)
-                tasks.remove(task)
-        else:
+        try:
+            next_time_str = task['next_time']
+            next_time = datetime.fromisoformat(next_time_str).replace(tzinfo=timezone.utc)
             while next_time < now:
-                next_time = datetime.fromisoformat(
-                    calculate_next(task['next_time'], task['recurring'], task.get('days')))
-            task['next_time'] = next_time.isoformat()
+                next_time_str = calculate_next(next_time_str, task['recurring'], task.get('days'))
+                next_time = datetime.fromisoformat(next_time_str).replace(tzinfo=timezone.utc)
+            task['next_time'] = next_time_str
+        except Exception as e:
+            app.logger.error(f"Error handling missed task {task['id']}: {e}")
     save_tasks()
 
     while True:
-        print("Scheduler loop iteration started")
         app.logger.debug("Scheduler loop iteration started")
         try:
             now = datetime.now()
@@ -322,7 +321,6 @@ def scheduler_loop():
                             if last_check_dt.tzinfo is None:
                                 last_check_dt = last_check_dt.replace(tzinfo=timezone.utc)
                         except ValueError as e:
-                            print(f"Failed to parse last_check '{last_check}': {e}, using one hour ago as fallback")
                             app.logger.warning(
                                 f"Failed to parse last_check '{last_check}': {e}, using one hour ago as fallback")
                     if last_check_dt is None or (now_utc - last_check_dt) >= interval:
@@ -341,7 +339,6 @@ def scheduler_loop():
                                 'per_page': '100'
                             }
                             issues_url = "https://seeclickfix.com/api/v2/issues"
-                            print(f"Fetching SCF issues after {after} with params: {params}")
                             app.logger.info(f"Fetching SCF issues after {after} with params: {params}")
                             resp = requests.get(issues_url, params=params, timeout=10)
                             resp.raise_for_status()
@@ -358,10 +355,8 @@ def scheduler_loop():
                             save_listeners()
                             app.logger.info(f"SCF listener checked at {scf['last_check']}, found {len(issues)} new issues")
                         except Exception as e:
-                            print(f"SCF listener error: {e}")
                             app.logger.error(f"SCF listener error: {e}")
                 elif scf['enabled'] and not scf.get('request_types', '').strip():
-                    print("SCF listener enabled but request_types empty; skipping check")
                     app.logger.warning("SCF listener enabled but request_types empty; skipping check")
         except Exception as e:
             app.logger.error(f"Scheduler loop error: {e}", exc_info=True)
