@@ -47,8 +47,14 @@
                 <p><strong>Connection:</strong> {{ printer_info.connection }}</p>
                 <p><strong>Status:</strong> {{ printer_info.status }}</p>
                 <form action="{{ url_for('test_print') }}" method="post" style="margin-top: 20px;">
-                    <button class="btn waves-effect waves-light" type="submit" aria-label="Test printer connection">
-                        Test Print
+                    <button class="btn waves-effect waves-light" type="submit" aria-label="Test task print">
+                        Test Task Print
+                        <i class="material-icons right">print</i>
+                    </button>
+                </form>
+                <form action="{{ url_for('test_scf_print') }}" method="post" style="margin-top: 20px;">
+                    <button class="btn waves-effect waves-light" type="submit" aria-label="Test SCF print">
+                        Test SCF Print
                         <i class="material-icons right">print</i>
                     </button>
                 </form>

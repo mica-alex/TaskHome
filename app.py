@@ -230,6 +230,7 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         p.text(f'Location: {address}\n')
         p.text(f'Reported: {reported_at}\n')
         p.text(f'Status: {status}\n')
+        p.text(f'Has Media: {"Yes" if "media" in issue and issue["media"]["image_full"] else "No"}\n')
 
         # Description (if present)
         if 'description' in issue and issue['description']:
@@ -244,10 +245,10 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         p.text(f'Printed at {print_time}\n')
 
         # Issue ID
-        p.text(f'Issue ID:\n')
         try:
             p.barcode(str(issue['id']), 'CODE39', width=2, height=60, pos='below', align_ct=True)
         except Exception as e:
+            p.text(f'Issue ID: {issue["id"]}\n')
             app.logger.error(f"Barcode print error: {e}")
 
         # Cut
@@ -429,6 +430,34 @@ def test_print():
     except Exception as e:
         app.logger.error(f"Test print error: {e}")
         return f'Test print failed: {e}. <a href="/settings">Back</a>'
+
+
+@app.route('/test_scf_print', methods=['POST'])
+def test_scf_print():
+    if not is_printer_connected():
+        return 'Printer not connected. <a href="/settings">Back</a>'
+    try:
+        # Example SCF issue data
+        test_issue = {
+            'id': 12345678,
+            'html_url': 'https://seeclickfix.com/issues/12345678',
+            'request_type': {'title': 'Streetlight Out'},
+            'address': '123 Main St, Springfield',
+            'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'status': 'Open',
+            'description': 'The streetlight in front of my house is not working.',
+            'summary': 'Streetlight outage reported',
+            'media': {
+                # 'image_full': 'https://seeclickfix.com/media/issues/12345678/full.jpg',
+                'image_full': None,
+                'image_square_100x100': 'https://seeclickfix.com/media/issues/12345678/thumb.jpg'
+            }
+        }
+        print_scf_issue(test_issue)
+        return 'Test SCF issue print successful! <a href="/settings">Back</a>'
+    except Exception as e:
+        app.logger.error(f"Test SCF print error: {e}")
+        return f'Test SCF print failed: {e}. <a href="/settings">Back</a>'
 
 
 @app.route('/add_task', methods=['POST'])
