@@ -157,7 +157,7 @@ def print_task(task):
         # QR code at the top
         p.set(align='center', density=4)
         qr_url = task.get('url', '') or f"http://{config['hostname']}:{PORT}/task_page#{task['id']}"
-        p.qr(qr_url, size=6, model=2)
+        p.qr(qr_url, size=5, model=2)
 
         # Title: bold, large, centered
         p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
@@ -210,7 +210,7 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         p = Usb(VID, PID, profile='TM-T20II')
         # QR code at the top (to issue HTML URL)
         p.set(align='center', density=4)
-        p.qr(issue['html_url'], size=6, model=2)
+        p.qr(issue['html_url'], size=5, model=2)
 
         # Category: bold, large, centered (like title)
         category = issue['request_type']['title'] if 'request_type' in issue and issue[
@@ -244,7 +244,11 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         p.text(f'Printed at {print_time}\n')
 
         # Issue ID
-        p.text(f'Issue ID: {issue["id"]}\n')
+        p.text(f'Issue ID:\n')
+        try:
+            p.barcode(str(issue['id']), 'CODE39', width=2, height=60, pos='below', align_ct=True)
+        except Exception as e:
+            app.logger.error(f"Barcode print error: {e}")
 
         # Cut
         p.cut()
@@ -353,7 +357,8 @@ def scheduler_loop():
                             # Update last_check with strict format
                             scf['last_check'] = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
                             save_listeners()
-                            app.logger.info(f"SCF listener checked at {scf['last_check']}, found {len(issues)} new issues")
+                            app.logger.info(
+                                f"SCF listener checked at {scf['last_check']}, found {len(issues)} new issues")
                         except Exception as e:
                             app.logger.error(f"SCF listener error: {e}")
                 elif scf['enabled'] and not scf.get('request_types', '').strip():
