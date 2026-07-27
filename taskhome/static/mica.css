@@ -154,9 +154,11 @@ body::before {
 .mica-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 16px;
-  min-height: 40px;               /* tap target */
+  padding: 0 16px;
+  height: var(--mica-control-height);
+  box-sizing: border-box;
   border: 1px solid var(--mica-accent);
   border-radius: var(--mica-radius);
   background-color: var(--mica-accent);
@@ -195,17 +197,32 @@ body::before {
 .mica-field input,
 .mica-field select,
 .mica-field textarea {
-  padding: 8px 12px;
-  min-height: 40px;
+  padding: 0 12px;
+  height: var(--mica-control-height);
   border: 1px solid var(--mica-divider);
   border-radius: var(--mica-radius);
   background-color: var(--mica-bg-elevated);
   color: var(--mica-text);
   font: inherit;
   box-sizing: border-box;
-  /* Must stay visible without Materialize (P0-15). */
-  display: block !important;
+  display: block;
 }
+
+/* A select's intrinsic sizing ignores the padding above, so it needs the
+   height stated explicitly or it sits a few pixels short of its neighbours --
+   which is exactly how it looked next to the search box and Search button. */
+select.mica-input,
+.mica-field select {
+  height: var(--mica-control-height);
+  line-height: normal;
+  padding-right: 32px;            /* room for the native arrow */
+  appearance: auto;
+}
+
+/* Textareas and multi-line controls opt out of the fixed height. */
+.mica-input[type="search"] { padding: 0 12px; }
+textarea.mica-input,
+.mica-field textarea { height: auto; padding: 8px 12px; min-height: 80px; }
 
 .mica-input:focus,
 .mica-field input:focus,
@@ -588,6 +605,10 @@ tr.task-inactive td { opacity: 0.6; }
 }
 
 .history-filter input[type="search"] { flex: 1 1 240px; min-width: 0; }
+
+/* Every control in a filter row shares one height, so they line up. */
+.history-filter .mica-input,
+.history-filter .mica-btn { height: var(--mica-control-height); }
 
 .pager {
   display: flex;

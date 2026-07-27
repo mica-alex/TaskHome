@@ -33,7 +33,7 @@
           {% for task in tasks %}
           <tr class="{% if not task.enabled %}task-inactive{% endif %}">
             <td>{{ task.title }}</td>
-            <td>{% if task.enabled %}{{ task.next_time }}{% else %}&mdash;{% endif %}</td>
+            <td>{% if task.enabled %}{% with value = task.next_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}{% else %}&mdash;{% endif %}</td>
             <td>{{ task.recurring }}</td>
             <td>{% include 'partials/task_status.html' %}</td>
           </tr>
@@ -69,7 +69,7 @@
               {{ item.title }}
             {%- endif -%}
           </td>
-          <td>{{ item.print_time }}</td>
+          <td>{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
         </tr>
         {% else %}
         <tr><td colspan="3" class="empty-state">Nothing has printed yet.</td></tr>

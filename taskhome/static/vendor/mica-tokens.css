@@ -68,6 +68,11 @@
   --mica-radius-lg: 16px;
   --mica-radius-pill: 999px;
 
+  /* One height for every interactive control. Inputs, selects and buttons
+     size differently from intrinsic content, so min-height alone left them
+     visibly mismatched in a row. */
+  --mica-control-height: 40px;
+
   /* --- spacing (MUI's 8px base) --------------------------------------- */
   --mica-space-1: 4px;
   --mica-space-2: 8px;

@@ -185,3 +185,58 @@ def test_datetime_input_is_native():
     '...T21:00:00:00' that used to poison the scheduler."""
     form = (TEMPLATES / 'partials' / 'task_form.html').read_text()
     assert 'type="datetime-local"' in form
+
+
+# --- control sizing and timestamps --------------------------------------------
+
+def test_controls_share_one_height_token():
+    """Inputs, selects and buttons size differently from intrinsic content, so
+    min-height alone left them visibly mismatched in a row -- the select sat a
+    few pixels short of the search box beside it."""
+    tokens = (VENDOR / 'mica-tokens.css').read_text()
+    css = (REPO / 'taskhome' / 'static' / 'mica.css').read_text()
+    assert '--mica-control-height' in tokens
+    for selector in ('.mica-btn', '.mica-input', 'select.mica-input'):
+        start = css.index(selector)
+        block = css[start:css.index('}', start)]
+        assert 'var(--mica-control-height)' in block, (
+            f'{selector} does not use the shared control height')
+
+
+def test_multiline_controls_opt_out_of_the_fixed_height():
+    css = (REPO / 'taskhome' / 'static' / 'mica.css').read_text()
+    start = css.index('textarea.mica-input')
+    assert 'height: auto' in css[start:css.index('}', start)]
+
+
+def test_timestamps_declare_whether_they_are_timezone_aware():
+    """TaskHome stores two kinds. Naive values (print_time, next_time) carry no
+    offset, so converting them to the viewer's timezone would silently shift
+    them; aware values (SCF reported_at) are genuine instants and should be
+    converted. The template has to say which is which."""
+    partial = (TEMPLATES / 'partials' / 'timestamp.html').read_text()
+    assert 'data-aware' in partial and 'datetime=' in partial
+
+    for name in ('tasks.html', 'index.html'):
+        text = (TEMPLATES / name).read_text()
+        assert "partials/timestamp.html" in text, f'{name} renders raw timestamps'
+
+
+def test_timestamp_falls_back_to_the_raw_value():
+    """Without JavaScript the element still shows something meaningful."""
+    partial = (TEMPLATES / 'partials' / 'timestamp.html').read_text()
+    assert '>{{ value }}</time>' in partial
+
+
+def test_timestamp_script_trims_microseconds():
+    """Python writes microseconds; JavaScript's Date accepts at most
+    milliseconds, and the extra digits make it unparseable in some engines."""
+    js = (REPO / 'taskhome' / 'static' / 'ui.js').read_text()
+    assert 'replace(/(\\.\\d{3})\\d+/' in js
+
+
+def test_naive_timestamps_are_not_converted():
+    js = (REPO / 'taskhome' / 'static' / 'ui.js').read_text()
+    start = js.index('function parseStamp')
+    block = js[start:js.index('function formatStamp')]
+    assert 'if (!aware)' in block, 'parseStamp does not distinguish the two kinds'

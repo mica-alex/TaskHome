@@ -84,10 +84,79 @@
     });
   }
 
+  /*
+   * Timestamps.
+   *
+   * TaskHome stores two different kinds and they must be treated differently:
+   *
+   *   naive  ("2025-08-26T09:36:54.106869") -- task times and print times.
+   *          No offset, so the browser cannot know which instant is meant.
+   *          These are already local to the appliance, so they are formatted
+   *          in place and NOT converted; converting would silently shift them
+   *          by the difference between the two machines' zones.
+   *
+   *   aware  ("2025-08-26T13:36:42Z") -- SCF report times. A genuine instant,
+   *          so it is converted to the viewer's timezone.
+   *
+   * The raw value stays in the title attribute either way, because a
+   * prettified time is worse than a precise one when something looks wrong.
+   */
+  function parseStamp(value, aware) {
+    if (!value) return null;
+    // JS accepts at most milliseconds; Python writes microseconds.
+    var text = String(value).replace(/(\.\d{3})\d+/, '$1');
+    if (!aware) {
+      // Strip any offset and parse as local, so no conversion happens.
+      text = text.replace(/(Z|[+-]\d{2}:?\d{2})$/, '');
+    }
+    var date = new Date(text);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  function formatStamp(date) {
+    var now = new Date();
+    var diff = (now - date) / 1000;
+    var absolute = date.toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    });
+    // Relative for the recent past: "12 min ago" answers "did that just
+    // happen?" far faster than a date does.
+    if (diff >= 0 && diff < 60) return 'just now';
+    if (diff >= 0 && diff < 3600) return Math.floor(diff / 60) + ' min ago';
+    if (diff >= 0 && diff < 86400) {
+      var hours = Math.floor(diff / 3600);
+      return hours + (hours === 1 ? ' hour ago' : ' hours ago');
+    }
+    var startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = Math.round((startOfToday - new Date(
+      date.getFullYear(), date.getMonth(), date.getDate())) / 86400000);
+    var time = date.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+    if (days === 0) return 'Today, ' + time;
+    if (days === 1) return 'Yesterday, ' + time;
+    if (days === -1) return 'Tomorrow, ' + time;
+    return absolute;
+  }
+
+  function wireTimestamps(scope) {
+    (scope || document).querySelectorAll('time.ts').forEach(function (node) {
+      var raw = node.getAttribute('datetime');
+      var date = parseStamp(raw, node.dataset.aware === 'true');
+      if (!date) return;                     // leave the raw value visible
+      node.textContent = formatStamp(date);
+      node.title = raw + (node.dataset.aware === 'true'
+        ? ' (converted to your timezone)'
+        : ' (local to TaskHome)');
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     wireDialogs();
     wireRecurrence();
+    wireTimestamps();
   });
 
-  global.TaskHome = {toast: toast, wireDialogs: wireDialogs, wireRecurrence: wireRecurrence};
+  global.TaskHome = {toast: toast, wireDialogs: wireDialogs,
+                   wireRecurrence: wireRecurrence, wireTimestamps: wireTimestamps,
+                   formatStamp: formatStamp, parseStamp: parseStamp};
 })(window);

@@ -1,0 +1,18 @@
+{#
+  Render a timestamp for the browser to format.
+
+  `value`  the stored string
+  `aware`  true when it carries a UTC offset (SCF reported_at), false for the
+           naive local values TaskHome stores itself (print_time, next_time)
+
+  The distinction matters. A naive value has no offset, so the browser cannot
+  know what instant it refers to -- converting it to the viewer's timezone
+  would silently shift it by hours. Those are already local to the appliance
+  and are formatted in place. Aware values are genuine instants and *are*
+  converted.
+
+  The raw value is the element's text, so this degrades to what was shown
+  before if JavaScript never runs.
+#}
+<time class="ts" datetime="{{ value }}"
+      data-aware="{{ 'true' if aware else 'false' }}">{{ value }}</time>
