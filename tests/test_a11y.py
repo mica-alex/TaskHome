@@ -256,3 +256,54 @@ def test_mobile_css_targets_classes_that_exist():
                                    r'receipt-[\w-]+|row-[\w-]+|listener-[\w-]+)',
                                    mobile)):
         assert selector in markup, f'mobile CSS styles .{selector}, which nothing uses'
+
+
+# --- feedback and confirmation rules (P2-4) -----------------------------------
+
+def test_every_user_initiated_mutation_reports_its_outcome():
+    """A button that silently does nothing is indistinguishable from a broken
+    one, so this is not optional.
+
+    Scoped to *mutations*. A background poll updates the UI directly and must
+    not toast -- a status refresh announcing itself every ten seconds would be
+    unusable.
+    """
+    import pathlib
+    import re
+    for path in pathlib.Path('taskhome/static').glob('*.js'):
+        text = path.read_text()
+        for match in re.finditer(r"method:\s*'(POST|PATCH|PUT|DELETE)'", text):
+            window = text[match.start():match.start() + 1200]
+            line = text[:match.start()].count('\n') + 1
+            # Three legitimate forms of feedback. A live preview reports
+            # failures inline rather than toasting on every keystroke, which
+            # is better feedback, not worse -- the property is "reports its
+            # outcome", not "uses a toast".
+            reported = ('toast(' in window
+                        or 'location.reload' in window
+                        or 'errorEl' in window
+                        or 'hidden = false' in window)
+            assert reported, f'{path.name}:{line} mutates with no feedback'
+
+
+def test_irreversible_whole_object_deletions_confirm():
+    """The rule: confirm when the action is irreversible AND its effect is not
+    obvious from the control. Deleting a task, list or person qualifies."""
+    import pathlib
+    import re
+    for path in pathlib.Path('taskhome/static').glob('*.js'):
+        text = path.read_text()
+        for match in re.finditer(r"data-delete-(task|list|person)", text):
+            window = text[match.start():match.start() + 900]
+            if 'method:' not in window:
+                continue
+            assert 'confirm(' in window, \
+                f'{path.name}: {match.group(0)} deletes without confirming'
+
+
+def test_the_confirmation_rule_is_written_down():
+    """An undocumented inconsistency reads as an oversight."""
+    import pathlib
+    ui = pathlib.Path('taskhome/static/ui.js').read_text()
+    assert 'When to confirm' in ui
+    assert 'irreversible' in ui

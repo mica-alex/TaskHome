@@ -261,6 +261,30 @@
 })();
 
 /*
+ * When to confirm (MASTER_PLAN P2-4).
+ *
+ * The rule, so the inconsistency is deliberate rather than accidental:
+ *
+ *   Confirm when the action is irreversible AND its effect is not obvious
+ *   from the control that triggered it.
+ *
+ * So: deleting a task or a list confirms (irreversible, and a whole thing
+ * disappears). Reprinting from a history row confirms -- it is buried in a row
+ * menu and someone browsing history is not expecting paper. "Check now"
+ * confirms, because it can print several receipts at once.
+ *
+ * A button labelled "Print" does not confirm. Its effect is exactly what it
+ * says, and a dialog between the button and the paper is nagging, not safety.
+ * Removing one line from a list does not confirm either: it is one item, one
+ * click to re-add, and confirming each removal while tidying a shopping list
+ * would make the list unusable.
+ *
+ * Every action that reaches the network reports its outcome with a toast,
+ * confirmed or not -- that is not optional, because a button that silently
+ * does nothing is indistinguishable from a broken one.
+ */
+
+/*
  * Reprint and poll-now (MASTER_PLAN P4-6).
  *
  * Both emit real paper, so both confirm first. A misclick here costs a receipt
