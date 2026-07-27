@@ -6,6 +6,8 @@ started deliberately rather than as a side effect of importing a module
 are read, no thread starts, no printer is touched -- which is what makes the
 package safe to import from scripts and tests.
 """
+import os
+
 from flask import Flask
 
 from . import constants, state
@@ -41,7 +43,15 @@ def create_app(load=True, with_scheduler=False):
     app = Flask(__name__)
     app.register_blueprint(bp)
 
+
     configure_logging()
+    if os.environ.get('TASKHOME_DEV') == '1':
+        # Re-read templates on every request so edits show up on refresh.
+        # Deliberately opt-in: it costs a stat per template per request, which
+        # is pointless on an appliance that changes once a month.
+        app.config['TEMPLATES_AUTO_RELOAD'] = True
+        app.jinja_env.auto_reload = True
+        log.info('Dev mode: templates reload on every request')
     if load:
         storage.load_data()
         configure_logging()   # re-apply now that config['log_level'] is known

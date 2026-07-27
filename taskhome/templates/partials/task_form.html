@@ -1,0 +1,79 @@
+{#
+  Shared add/edit task fields.
+
+  One definition for both dialogs: they differed only in ids and prefilled
+  values, and keeping two copies is how the edit modal ended up with a broken
+  weekday toggle while the add form worked (P0-14).
+
+  `task` may be None (add) or a task dict (edit).
+#}
+<div class="mica-field">
+  <label for="title-{{ scope }}">Title</label>
+  <input id="title-{{ scope }}" class="mica-input" type="text" name="title"
+         value="{{ task.title if task else '' }}" required maxlength="120">
+</div>
+
+<div class="mica-field">
+  <label for="next-{{ scope }}">Next time</label>
+  {#
+    Native datetime-local, replacing flatpickr (P2B-6). The browser's own
+    picker is better on mobile, needs no library, and submits a canonical
+    value -- flatpickr's format was what produced '...T21:00:00:00'.
+  #}
+  <input id="next-{{ scope }}" class="mica-input" type="datetime-local"
+         name="next_time"
+         value="{{ task.next_time[:16] if task and task.next_time else '' }}">
+  <span class="mica-help">Leave blank to use now.</span>
+</div>
+
+<div class="mica-field">
+  <label for="recurring-{{ scope }}">Repeats</label>
+  <select id="recurring-{{ scope }}" class="mica-input" name="recurring">
+    {% for value, label in [
+        ('none', 'One-off'), ('daily', 'Daily'), ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'), ('every_weekday', 'Every weekday'),
+        ('first_day_month', 'First of month'), ('custom', 'Custom days')] %}
+      <option value="{{ value }}"
+        {% if task and task.recurring == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+{# Shown only for a custom recurrence; ui.js toggles it. #}
+<div class="mica-field custom-days"
+     {% if not (task and task.recurring == 'custom') %}hidden{% endif %}>
+  <label>Repeat on</label>
+  <div class="weekday-picker">
+    {% for index, name in [(0,'Mon'), (1,'Tue'), (2,'Wed'), (3,'Thu'),
+                           (4,'Fri'), (5,'Sat'), (6,'Sun')] %}
+      <label class="weekday">
+        <input type="checkbox" name="days" value="{{ index }}"
+               {% if task and task.days and index in task.days %}checked{% endif %}>
+        <span>{{ name }}</span>
+      </label>
+    {% endfor %}
+  </div>
+  <span class="mica-help">Pick at least one &mdash; a custom repeat with no
+    days can never come round.</span>
+</div>
+
+<div class="mica-field">
+  <label for="extra-{{ scope }}">Extra line <span class="mica-help">(optional)</span></label>
+  <input id="extra-{{ scope }}" class="mica-input" type="text" name="extra"
+         value="{{ task.extra if task and task.extra else '' }}" maxlength="200">
+</div>
+
+<div class="mica-field">
+  <label for="url-{{ scope }}">QR link <span class="mica-help">(optional)</span></label>
+  <input id="url-{{ scope }}" class="mica-input" type="url" name="url"
+         value="{{ task.url if task and task.url else '' }}"
+         placeholder="Defaults to this task in TaskHome">
+</div>
+
+<div class="mica-field">
+  <label class="mica-checkbox">
+    <input type="checkbox" name="enabled"
+           {% if task is none or task.enabled %}checked{% endif %}>
+    <span>Enabled</span>
+  </label>
+</div>

@@ -425,3 +425,207 @@ header.mica-appbar .mica-btn {
 
 /* The brand logo was sized for a 64px Materialize bar. */
 header.mica-appbar .mica-brand img { height: 26px; }
+
+/* --- layout ----------------------------------------------------------- */
+.mica-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--mica-space-6);
+  align-items: start;
+}
+
+.mica-card-narrow { max-width: 560px; }
+
+.mica-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mica-space-4);
+  margin-bottom: var(--mica-space-4);
+  flex-wrap: wrap;
+}
+
+.mica-card-head .mica-card-title { margin: 0; }
+
+.mica-status-line { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--mica-space-2); }
+
+/* Definition list used for read-only facts (printer details). */
+.mica-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px var(--mica-space-4);
+  margin: 0 0 var(--mica-space-4);
+}
+
+.mica-facts dt { color: var(--mica-text-muted); font-size: var(--mica-text-small); }
+.mica-facts dd { margin: 0; }
+
+.mica-row-actions { display: flex; gap: 6px; align-items: center; }
+.mica-row-actions form { margin: 0; }
+
+.mica-btn-icon { padding: 4px 10px; min-height: 32px; font-size: var(--mica-text-small); }
+
+.mica-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.mica-checkbox input { width: 18px; height: 18px; }
+
+/* --- weekday picker --------------------------------------------------- */
+.weekday-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.weekday {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  min-height: 36px;
+  border: 1px solid var(--mica-divider);
+  border-radius: var(--mica-radius);
+  cursor: pointer;
+  user-select: none;
+}
+
+.weekday:has(input:checked) {
+  border-color: var(--mica-accent);
+  background-color: color-mix(in srgb, var(--mica-accent) 12%, transparent);
+  color: var(--mica-accent);
+}
+
+/* --- dialogs (native <dialog>, replacing M.Modal) --------------------- */
+.mica-dialog {
+  width: min(560px, calc(100vw - 2rem));
+  max-height: min(85vh, 900px);
+  padding: var(--mica-space-6);
+  border: 1px solid var(--mica-divider);
+  border-radius: var(--mica-radius-lg);
+  background-color: var(--mica-surface);
+  color: var(--mica-text);
+  box-shadow: 0 12px 48px rgb(0 0 0 / 0.25);
+  overflow: auto;
+}
+
+.mica-dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(2px);
+}
+
+/* --- toasts (replacing M.toast) --------------------------------------- */
+.toasts {
+  position: fixed;
+  right: var(--mica-space-4);
+  bottom: var(--mica-space-4);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mica-space-2);
+  pointer-events: none;
+}
+
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--mica-radius);
+  background-color: var(--mica-gray-800);
+  color: #fff;
+  box-shadow: var(--mica-shadow-1);
+  font-size: var(--mica-text-body);
+  max-width: 380px;
+  animation: toast-in 180ms ease-out;
+}
+
+.toast-error { background-color: var(--mica-red-500); }
+.toast-info { background-color: var(--mica-brand-500); }
+.toast-leaving { opacity: 0; transition: opacity 240ms ease-out; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .toast-leaving { transition: none; }
+}
+
+/* Toasts sit bottom-centre on narrow screens, clear of thumbs. */
+@media (max-width: 600px) {
+  .toasts { left: var(--mica-space-4); right: var(--mica-space-4); align-items: center; }
+  .toast { max-width: 100%; }
+}
+
+/* --- status badges ----------------------------------------------------
+   A task can be off for three quite different reasons, and conflating them
+   is what made P0-13 painful: one disabled by a schedule error looked
+   identical to one the user switched off. */
+.badge-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--mica-radius-pill);
+  font-size: var(--mica-text-small);
+  font-weight: var(--mica-weight-semibold);
+  line-height: 1.6;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.badge-active   { background-color: var(--mica-green-500); }
+.badge-disabled { background-color: var(--mica-gray-500); }
+.badge-missed   { background-color: var(--mica-orange-500); }
+.badge-error    { background-color: var(--mica-red-500); }
+
+/* History record types, as chips. */
+.mica-chip.badge-task { background-color: var(--mica-brand-500); border-color: transparent; color: #fff; }
+.mica-chip.badge-scf  { background-color: hsl(280, 45%, 42%); border-color: transparent; color: #fff; }
+
+tr.task-inactive td { opacity: 0.6; }
+
+.empty-state { text-align: center; opacity: 0.7; font-style: italic; padding: var(--mica-space-6) !important; }
+
+/* --- history filter + pager ------------------------------------------- */
+.history-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mica-space-2);
+  align-items: center;
+  margin-bottom: var(--mica-space-4);
+}
+
+.history-filter input[type="search"] { flex: 1 1 240px; min-width: 0; }
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mica-space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--mica-space-4);
+  font-size: var(--mica-text-small);
+}
+
+.pager-summary { color: var(--mica-text-muted); }
+
+.pager-pages a, .pager-pages span,
+.pager-size a, .pager-size span {
+  display: inline-block;
+  min-width: 2em;
+  padding: 4px 8px;
+  text-align: center;
+  border-radius: var(--mica-radius);
+  color: var(--mica-text-muted);
+  text-decoration: none;
+}
+
+.pager-pages a:hover, .pager-size a:hover {
+  background-color: color-mix(in srgb, var(--mica-accent) 10%, transparent);
+  color: var(--mica-text);
+}
+
+.pager-pages .current, .pager-size .current {
+  background-color: var(--mica-accent);
+  color: var(--mica-accent-text);
+  font-weight: var(--mica-weight-semibold);
+}
+
+.pager-pages .disabled, .pager-pages .ellipsis { opacity: 0.35; }
+
+@media (max-width: 600px) {
+  .pager { justify-content: center; }
+  .pager-summary { width: 100%; text-align: center; }
+}

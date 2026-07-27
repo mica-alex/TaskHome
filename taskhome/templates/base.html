@@ -12,19 +12,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{% endblock %} - TaskHome</title>
-    <!-- Vendored, not CDN: this is a LAN appliance and must work with no
-         internet connection (P0-15). See static/vendor/README.md. -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/materialize.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/material-icons.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr.min.css') }}">
-    <!-- Mica design system: tokens, then Inter, then components (P2A) -->
+
+    {#
+      Everything is vendored: this is a LAN appliance and must work with no
+      internet (P0-15). Materialize and flatpickr are gone entirely (P2A-4) --
+      the UI is Mica components plus native <dialog> and datetime-local, which
+      drops ~390 KB of CSS and JS and, more usefully, a whole class of "the
+      library styled it differently than we did" bugs.
+    #}
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/mica-tokens.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/inter.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/material-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mica.css') }}">
     <link rel="preload" as="font" type="font/woff2" crossorigin
           href="{{ url_for('static', filename='vendor/fonts/inter-variable.woff2') }}">
-    <!-- Custom styles -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
     <script>
         (function () {
             var root = document.documentElement;
@@ -103,6 +105,8 @@
                {% if request.endpoint == 'main.task_page' %}aria-current="page"{% endif %}>Tasks</a>
             <a href="{{ url_for('main.listener') }}"
                {% if request.endpoint == 'main.listener' %}aria-current="page"{% endif %}>Listeners</a>
+            <a href="{{ url_for('main.receipt_studio') }}"
+               {% if request.endpoint == 'main.receipt_studio' %}aria-current="page"{% endif %}>Receipts</a>
             <a href="{{ url_for('main.settings') }}"
                {% if request.endpoint == 'main.settings' %}aria-current="page"{% endif %}>Settings</a>
         </nav>
@@ -113,45 +117,20 @@
                 {{ 'Ready' if printer_online else 'No printer' }}
             </span>
             {% endif %}
-            <button type="button" class="mica-btn mica-btn-secondary" id="theme-toggle"
+            <button type="button" class="mica-btn mica-btn-secondary mica-btn-icon" id="theme-toggle"
                     aria-label="Toggle theme" title="Toggle light / dark">◐</button>
         </div>
     </header>
-    <main class="mica-container container">
+
+    <main class="mica-container">
         {% block content %}
         {% endblock %}
     </main>
-    <script src="{{ url_for('static', filename='vendor/materialize.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/flatpickr.min.js') }}"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize modals
-            var modals = document.querySelectorAll('.modal');
-            M.Modal.init(modals, {
-                dismissible: true,
-                opacity: 0.5,
-                inDuration: 300,
-                outDuration: 200
-            });
-            // Initialize select elements
-                        /*
-             * Skip Mica-styled controls. FormSelect replaces a <select> with
-             * its own markup and hides the original; a control we also style
-             * ourselves then renders twice -- once real, once fake. Excluding
-             * them here is the fix, not fighting it with CSS.
-             */
-            var selects = document.querySelectorAll('select:not(.mica-input):not([data-no-materialize])');
-            M.FormSelect.init(selects);
-            // Initialize datetimepicker
-            var datetimepickers = document.querySelectorAll('.datetimepicker');
-            flatpickr(datetimepickers, {
-                enableTime: true,
-                dateFormat: 'Y-m-d H:i',
-                time_24hr: false,
-                defaultHour: 12,
-                defaultMinute: 0
-            });
-        });
-    </script>
+
+    {# Toast host, replacing M.toast. See toast() in ui.js. #}
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+    <script src="{{ url_for('static', filename='ui.js') }}"></script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,71 +1,84 @@
 {% extends 'base.html' %}
-
 {% block title %}Home{% endblock %}
-
 {% block content %}
-
-    <div class="card">
-        <div class="card-content">
-            <span class="card-title">Welcome to TaskHome</span>
-            <p>Printer Status: {{ status }}</p>
-        </div>
+<div class="mica-grid-2">
+  <div class="mica-card">
+    <h2 class="mica-card-title">Printer</h2>
+    <p class="mica-status-line">
+      <span class="mica-status-dot {{ 'is-online' if status == 'Connected' else 'is-offline' }}"></span>
+      <strong>{{ status }}</strong>
+    </p>
+    <p class="mica-help">
+      {% if status == 'Connected' %}
+        Receipts print as tasks come due.
+      {% else %}
+        Occurrences are held and retried &mdash; nothing is lost while the
+        printer is away.
+      {% endif %}
+    </p>
+    <div class="studio-actions">
+      <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.settings') }}">Settings</a>
+      <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.receipt_studio') }}">Receipt styles</a>
     </div>
+  </div>
 
-    <div class="card">
-        <div class="card-content">
-            <span class="card-title">Scheduled Tasks</span>
-            <table class="striped">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Next Time</th>
-                        <th>Recurring</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for task in tasks %}
-                    <tr class="{% if not task.enabled %}task-inactive{% endif %}">
-                        <td>{{ task.title }}</td>
-                        <td>{% if task.enabled %}{{ task.next_time }}{% else %}&mdash;{% endif %}</td>
-                        <td>{{ task.recurring }}</td>
-                        <td>{% include 'partials/task_status.html' %}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="4" class="empty-state">No tasks yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            <div class="card-action">
-                <a href="/task_page">Manage Tasks <i class="material-icons right">arrow_forward</i></a>
-            </div>
-        </div>
+  <div class="mica-card">
+    <h2 class="mica-card-title">Scheduled Tasks</h2>
+    <div class="mica-table-scroll">
+      <table class="mica-table">
+        <thead>
+          <tr><th>Title</th><th>Next</th><th>Repeats</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+          <tr class="{% if not task.enabled %}task-inactive{% endif %}">
+            <td>{{ task.title }}</td>
+            <td>{% if task.enabled %}{{ task.next_time }}{% else %}&mdash;{% endif %}</td>
+            <td>{{ task.recurring }}</td>
+            <td>{% include 'partials/task_status.html' %}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty-state">No tasks yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-
-    <div class="card">
-        <div class="card-content">
-            <span class="card-title">Last 5 Prints</span>
-            <table class="striped">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Print Time</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in history %}
-                    <tr>
-                        {% if item.type == 'scf' %}
-                            <td>SCF: {{ item.category }} {% if item.summary %} - {{ item.id }}{% endif %}</td>
-                        {% else %}
-                            <td>{{ item.title }}</td>
-                        {% endif %}
-                        <td>{{ item.print_time }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <div class="studio-actions">
+      <a class="mica-btn" href="{{ url_for('main.task_page') }}">Manage tasks</a>
     </div>
+  </div>
+</div>
 
+<div class="mica-card">
+  <h2 class="mica-card-title">Last 5 Prints</h2>
+  <div class="mica-table-scroll">
+    <table class="mica-table">
+      <thead><tr><th>Type</th><th>Title</th><th>Printed</th></tr></thead>
+      <tbody>
+        {% for item in history %}
+        <tr>
+          <td>
+            <span class="mica-chip {{ 'badge-scf' if item.type == 'scf' else 'badge-task' }}">
+              {{ 'SCF' if item.type == 'scf' else 'Task' }}
+            </span>
+          </td>
+          <td>
+            {%- if item.type == 'scf' -%}
+              {{ item.category }}{% if item.address %} &mdash; {{ item.address }}{% endif %}
+            {%- else -%}
+              {{ item.title }}
+            {%- endif -%}
+          </td>
+          <td>{{ item.print_time }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="empty-state">Nothing has printed yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="studio-actions">
+    <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.task_page') }}">Full history</a>
+  </div>
+</div>
 {% endblock %}

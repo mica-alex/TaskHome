@@ -104,7 +104,7 @@ sniffs the response text for the word `successful` to pick a toast
 
 The front end depends on three CDNs (Materialize CSS/JS, Google Material Icons,
 flatpickr — `templates/base.html:8-12,48-50`). Offline, selects become unusable
-because `static/styles.css:102-104` hides native `<select>`s pending
+because the old `styles.css` hid native `<select>`s pending
 Materialize's replacement (MASTER_PLAN `P0-15`).
 
 ## Printing layer

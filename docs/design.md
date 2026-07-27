@@ -53,16 +53,26 @@ Taken from how the site actually uses MUI: **cards are outlined by default**,
 with elevation reserved for genuinely floating surfaces; chips carry status and
 categories; the Rounded icon family is preferred.
 
-## Coexistence with Materialize
+## Materialize is gone (P2A-4)
 
-`mica.css` is additive — it styles TaskHome's own class names rather than
-overriding Materialize, so pages can migrate one at a time. `P2A-4` retires
-Materialize once nothing depends on it.
+`mica.css` is now the only stylesheet. Materialize and flatpickr were removed
+along with `styles.css`, the sheet that existed purely to override them —
+about 390 KB of CSS and JS.
 
-One trap: `styles.css` hides native `<select>` elements (a Materialize
-workaround), so Mica field styles re-assert `display: block !important`.
-Without that, every dropdown vanishes when Materialize fails to load — which is
-exactly the offline case the vendoring exists to support.
+The size was the smaller win. The real one was removing a class of bug where
+two systems styled the same element and disagreed: a blue slab painted through
+the appbar by leftover `nav` rules, and a doubled dropdown where Materialize
+replaced a `<select>` we were also styling. Both looked like design mistakes
+rather than errors, which made them slow to spot.
+
+Replacements are native rather than reimplemented:
+
+| Was | Now |
+| --- | --- |
+| `M.Modal` | `<dialog>` — focus trapping, Escape and backdrop for free |
+| `M.toast` | `TaskHome.toast()` in `ui.js`, ~20 lines |
+| `M.FormSelect` | plain `<select>` styled by `.mica-input` |
+| flatpickr | `<input type="datetime-local">` — better on mobile, and it submits a canonical value |
 
 ## Keeping in sync
 

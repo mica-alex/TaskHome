@@ -4,18 +4,15 @@
 {#
   Shown when a form submission is rejected (P0-9). Deliberately plain: the
   submitted values are lost on the way here, which is the main reason
-  MASTER_PLAN P2-4 replaces this with inline field errors and toasts once the
-  /api/ layer lands. Until then, this is at least an honest, styled page
-  instead of a Flask 500 traceback.
+  MASTER_PLAN P2-4 replaces this with inline field errors once the /api/ layer
+  covers the write routes.
 #}
-<div class="card">
-    <div class="card-content">
-        <span class="card-title">That didn't work</span>
-        <p>{{ message }}</p>
-    </div>
-    <div class="card-action">
-        <a href="javascript:history.back()">Go back and fix it</a>
-        <a href="{{ url_for('main.index') }}">Home</a>
-    </div>
+<div class="mica-card mica-card-narrow">
+  <h1 class="mica-card-title">That didn't work</h1>
+  <p>{{ message }}</p>
+  <div class="studio-actions">
+    <a class="mica-btn" href="javascript:history.back()">Go back and fix it</a>
+    <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.index') }}">Home</a>
+  </div>
 </div>
 {% endblock %}

@@ -1,112 +1,99 @@
 {% extends 'base.html' %}
-
 {% block title %}Settings{% endblock %}
-
 {% block content %}
-<div class="container">
-    <div class="section">
-        <h2>Settings</h2>
-        <div class="card">
-            <div class="card-content">
-                <form action="{{ url_for('main.settings') }}" method="post">
-                    <div class="input-field">
-                        <input id="max_history" name="max_history" type="number" min="1" step="1" pattern="[0-9]*" value="{{ config.max_history }}" required aria-required="true">
-                        <label for="max_history">Max History</label>
-                    </div>
-                    <div class="input-field">
-                        <input id="hostname" name="hostname" type="text" value="{{ config.hostname }}" required aria-required="true">
-                        <label for="hostname">Hostname</label>
-                    </div>
-                    <div class="input-field">
-                        <select id="theme" name="theme" aria-label="Theme selection">
-                            <option value="system" {% if config.theme == 'system' %}selected{% endif %}>Match System</option>
-                            <option value="light" {% if config.theme == 'light' %}selected{% endif %}>Light</option>
-                            <option value="dark" {% if config.theme == 'dark' %}selected{% endif %}>Dark</option>
-                        </select>
-                        <label for="theme">Theme</label>
-                    </div>
-                    <button class="btn waves-effect waves-light" type="submit" aria-label="Save settings">
-                        Save Settings
-                        <i class="material-icons right">save</i>
-                    </button>
-                    {# Irreversible and one click away from Save; confirm first. #}
-                    <button class="btn-flat waves-effect" type="submit" name="clear_history"
-                            aria-label="Clear task history"
-                            onclick="return confirm('Permanently delete all print history? This cannot be undone.');">
-                        Clear History
-                        <i class="material-icons right">delete_sweep</i>
-                    </button>
-                </form>
-            </div>
-        </div>
+<div class="mica-grid-2">
+  <div class="mica-card">
+    <h1 class="mica-card-title">Settings</h1>
+    <form method="POST" action="{{ url_for('main.settings') }}">
+      <div class="mica-field">
+        <label for="hostname">Hostname</label>
+        <input id="hostname" class="mica-input" type="text" name="hostname"
+               value="{{ config.hostname }}">
+        <span class="mica-help">Used to build the QR link on task receipts.</span>
+      </div>
+
+      <div class="mica-field">
+        <label for="max_history">History size</label>
+        <input id="max_history" class="mica-input" type="number" name="max_history"
+               min="0" max="100000" value="{{ config.max_history }}">
+        <span class="mica-help">Older records are dropped once the cap is reached.</span>
+      </div>
+
+      <div class="mica-field">
+        <label for="theme">Theme</label>
+        <select id="theme" class="mica-input" name="theme">
+          <option value="system" {% if config.theme == 'system' %}selected{% endif %}>Match system</option>
+          <option value="light" {% if config.theme == 'light' %}selected{% endif %}>Light</option>
+          <option value="dark" {% if config.theme == 'dark' %}selected{% endif %}>Dark</option>
+        </select>
+        <span class="mica-help">The appbar toggle overrides this for this browser only.</span>
+      </div>
+
+      <div class="studio-actions">
+        <button type="submit" class="mica-btn">Save settings</button>
+        <button type="submit" name="clear_history" value="1" class="mica-btn mica-btn-danger"
+                onclick="return confirm('Permanently delete all print history? This cannot be undone.');">
+          Clear history
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <div class="mica-card">
+    <h2 class="mica-card-title">Printer</h2>
+    <dl class="mica-facts">
+      <dt>Manufacturer</dt><dd>{{ printer_info.manufacturer }}</dd>
+      <dt>Model</dt><dd>{{ printer_info.model }}</dd>
+      <dt>Connection</dt><dd>{{ printer_info.connection }}</dd>
+      <dt>Status</dt>
+      <dd>
+        <span class="mica-status-dot {{ 'is-online' if printer_info.status == 'Connected' else 'is-offline' }}"></span>
+        {{ printer_info.status }}
+      </dd>
+    </dl>
+
+    <p class="mica-help">
+      Test prints emit real paper. They use the currently active receipt style
+      &mdash; edit it under <a href="{{ url_for('main.receipt_studio') }}">Receipts</a>.
+    </p>
+    <div class="studio-actions">
+      <button type="button" class="mica-btn mica-btn-secondary" id="test-task-print-btn">
+        Test task receipt
+      </button>
+      <button type="button" class="mica-btn mica-btn-secondary" id="test-scf-print-btn">
+        Test SCF receipt
+      </button>
     </div>
-
-    <div class="section">
-        <h2>Connected Hardware</h2>
-        <div class="card">
-            <div class="card-content">
-                <p><strong>Manufacturer:</strong> {{ printer_info.manufacturer }}</p>
-                <p><strong>Model:</strong> {{ printer_info.model }}</p>
-                <p><strong>Connection:</strong> {{ printer_info.connection }}</p>
-                <p><strong>Status:</strong> {{ printer_info.status }}</p>
-                <button class="btn waves-effect waves-light" type="button" id="test-task-print-btn" aria-label="Test task print" style="margin-top: 20px;">
-                    Test Task Print
-                    <i class="material-icons right">print</i>
-                </button>
-                <button class="btn waves-effect waves-light" type="button" id="test-scf-print-btn" aria-label="Test SCF print" style="margin-top: 20px;">
-                    Test SCF Print
-                    <i class="material-icons right">print</i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Initialize Materialize select and handle test print buttons -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Initializing Materialize selects');
-                        /*
-             * Skip Mica-styled controls. FormSelect replaces a <select> with
-             * its own markup and hides the original; a control we also style
-             * ourselves then renders twice -- once real, once fake. Excluding
-             * them here is the fix, not fighting it with CSS.
-             */
-            var selects = document.querySelectorAll('select:not(.mica-input):not([data-no-materialize])');
-            M.FormSelect.init(selects, {
-                onOpenStart: function() { console.log('Select opened'); },
-                onCloseEnd: function() { console.log('Select closed'); }
-            });
-
-            // Helper for toast feedback
-            function showToast(msg, success=true) {
-                M.toast({html: msg, classes: success ? 'green' : 'red'});
-            }
-
-            /*
-             * Test prints. The server now reports failure with a non-2xx
-             * status, so trust resp.ok rather than sniffing the body for the
-             * substring 'successful' (which also matched "print failed:
-             * ... successful" style messages). Buttons disable while the
-             * request is in flight so a double click can't emit two receipts.
-             */
-            function wireTestPrint(buttonId, url, label) {
-                const button = document.getElementById(buttonId);
-                if (!button) return;
-                button.addEventListener('click', function() {
-                    if (button.disabled) return;
-                    button.disabled = true;
-                    fetch(url, {method: 'POST'})
-                        .then(resp => {
-                            showToast(resp.ok ? label + ' sent!' : label + ' failed.', resp.ok);
-                        })
-                        .catch(() => showToast(label + ' error.', false))
-                        .finally(() => { button.disabled = false; });
-                });
-            }
-
-            wireTestPrint('test-task-print-btn', '{{ url_for("main.test_print") }}', 'Test task print');
-            wireTestPrint('test-scf-print-btn', '{{ url_for("main.test_scf_print") }}', 'Test SCF print');
-        });
-    </script>
+  </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /*
+   * Test prints. The server reports failure with a non-2xx status, so trust
+   * resp.ok rather than sniffing the body for 'successful' -- which also
+   * matched failure messages containing the word. Buttons disable in flight
+   * so a double click cannot emit two receipts.
+   */
+  (function () {
+    function wire(id, url, label) {
+      var button = document.getElementById(id);
+      if (!button) return;
+      button.addEventListener('click', function () {
+        if (button.disabled) return;
+        button.disabled = true;
+        fetch(url, {method: 'POST'})
+          .then(function (resp) {
+            TaskHome.toast(resp.ok ? label + ' sent' : label + ' failed',
+                           resp.ok ? 'ok' : 'error');
+          })
+          .catch(function () { TaskHome.toast(label + ' error', 'error'); })
+          .finally(function () { button.disabled = false; });
+      });
+    }
+    wire('test-task-print-btn', '{{ url_for("main.test_print") }}', 'Test task print');
+    wire('test-scf-print-btn', '{{ url_for("main.test_scf_print") }}', 'Test SCF print');
+  })();
+</script>
 {% endblock %}

@@ -32,9 +32,8 @@ def test_templates_load_no_remote_assets(path):
 
 
 @pytest.mark.parametrize('name', [
-    'materialize.min.css', 'materialize.min.js',
-    'flatpickr.min.css', 'flatpickr.min.js',
     'material-icons.css', 'material-icons.ttf',
+    'mica-tokens.css', 'inter.css', 'fonts/inter-variable.woff2',
 ])
 def test_vendored_asset_exists_and_is_not_empty(name):
     path = VENDOR / name
@@ -59,20 +58,6 @@ def test_vendored_css_makes_no_runtime_requests():
         refs += re.findall(r'@import\s+[\'"](https?://[^\'"]+)', text)
         assert refs == [], f'{css_file.name} fetches {refs} at runtime'
 
-
-def test_native_selects_stay_visible_without_materialize():
-    """The bug: an unconditional `select { display: none }` hid every dropdown
-    when Materialize didn't load. Hiding must be scoped to selects Materialize
-    has actually wrapped."""
-    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
-    for match in re.finditer(r'([^{}]*)\{([^}]*)\}', css):
-        selector, body = match.group(1).strip(), match.group(2)
-        if 'display' not in body or 'none' not in body:
-            continue
-        selectors = [s.strip() for s in selector.split(',')]
-        assert 'select' not in selectors, (
-            'bare `select` is hidden unconditionally; scope it to '
-            '.select-wrapper so an uninitialised select still renders')
 
 
 def test_destructive_action_confirms():
@@ -139,12 +124,6 @@ def test_both_themes_define_every_semantic_token():
     assert not missing, f'dark theme is missing {missing}'
 
 
-def test_mica_inputs_survive_without_materialize():
-    """styles.css hides native selects; the Mica field styles must override
-    that or every dropdown vanishes offline (P0-15)."""
-    css = (REPO / 'taskhome' / 'static' / 'mica.css').read_text()
-    assert 'display: block !important' in css
-
 
 def test_no_styles_target_the_removed_nav_markup():
     """The old Materialize <nav> appbar is gone (P2A-3).
@@ -153,7 +132,7 @@ def test_no_styles_target_the_removed_nav_markup():
     full-width blue bar straight through the replacement. Dead CSS that only
     *looks* dead is worse than none: it still matches.
     """
-    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
+    css = (REPO / 'taskhome' / 'static' / 'mica.css').read_text()
     for selector in ('.nav-wrapper', '.brand-logo-container', '.brand-logo-img',
                      'nav ul.right', 'nav .brand-logo'):
         assert selector not in css, f'{selector} is styled but no longer rendered'
@@ -164,39 +143,45 @@ def test_no_styles_target_the_removed_nav_markup():
             assert markup not in text, f'{template.name} still uses {markup}'
 
 
-def test_legacy_input_overrides_exempt_mica_controls():
-    """styles.css forces input colours with !important to keep Materialize
-    readable in dark mode. Unscoped, that beats .mica-input and the new
-    components silently render in the old palette."""
-    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
-    assert ':not(.mica-input)' in css, (
-        'the legacy input overrides are not exempting Mica controls')
 
 
-def test_materialize_skips_mica_controls():
-    """Materialize's FormSelect replaces a <select> with its own markup and
-    hides the original. A control we also style ourselves then renders twice --
-    once real, once fake -- which is what produced the doubled dropdown on the
-    history filter. Every template that initialises selects must exclude them.
-    """
-    initialising = [p for p in template_files() if 'FormSelect.init' in p.read_text()]
-    assert initialising, 'expected at least one template to initialise selects'
-    for path in initialising:
-        text = path.read_text()
-        assert ':not(.mica-input)' in text, (
-            f'{path.name} initialises Materialize selects without excluding '
-            f'Mica-styled ones')
+# --- Materialize and flatpickr are gone (P2A-4) -------------------------------
+
+def test_no_library_assets_remain():
+    """Retiring them is the point: ~390 KB of CSS and JS, and with it a whole
+    class of "the library styled it differently than we did" bugs -- the
+    doubled dropdown and the blue slab through the appbar were both that."""
+    for gone in ('materialize.min.css', 'materialize.min.js',
+                 'flatpickr.min.css', 'flatpickr.min.js'):
+        assert not (VENDOR / gone).exists(), f'{gone} is still vendored'
+    assert not (REPO / 'taskhome' / 'static' / 'styles.css').exists(), (
+        'styles.css was the Materialize override sheet; its live rules moved '
+        'into mica.css')
 
 
-def test_mica_control_appearance_is_not_overridden_by_legacy_css():
-    """styles.css must not restate colours for controls mica.css owns: a more
-    specific legacy selector wins and renders the new UI in the old palette,
-    which reads as a design mistake rather than a bug."""
-    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
-    block_start = css.find('.history-filter input[type="search"]')
-    assert block_start != -1
-    block = css[block_start:css.index('}', block_start)]
-    for property_name in ('background-color', 'color', 'border'):
-        assert property_name not in block, (
-            f'.history-filter input restates {property_name}; leave appearance '
-            f'to .mica-input')
+@pytest.mark.parametrize('path', template_files(), ids=lambda p: p.name)
+def test_no_template_references_the_retired_libraries(path):
+    text = path.read_text()
+    for token in ('materialize.min', 'flatpickr', 'M.toast', 'M.Modal',
+                  'M.FormSelect', 'waves-effect', 'modal-trigger',
+                  'card-content', 'input-field'):
+        # Comments may mention them historically; markup and script must not.
+        stripped = re.sub(r'\{#.*?#\}', '', text, flags=re.S)
+        stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.S)
+        assert token not in stripped, f'{path.name} still uses {token}'
+
+
+def test_dialogs_are_native():
+    """Native <dialog> gives focus trapping, Escape and the backdrop for
+    free -- all of which Materialize implemented by hand, and less well."""
+    tasks = (TEMPLATES / 'tasks.html').read_text()
+    assert '<dialog' in tasks
+    assert 'data-open-dialog' in tasks and 'data-close-dialog' in tasks
+
+
+def test_datetime_input_is_native():
+    """Replaces flatpickr (P2B-6). Better on mobile, no library, and it
+    submits a canonical value -- flatpickr's format produced the
+    '...T21:00:00:00' that used to poison the scheduler."""
+    form = (TEMPLATES / 'partials' / 'task_form.html').read_text()
+    assert 'type="datetime-local"' in form
