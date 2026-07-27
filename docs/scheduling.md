@@ -84,6 +84,8 @@ forever.
 
 ## Steady-state firing (every 60s)
 
+The tick order is `queue.drain()` → `run_due_tasks()` → `scf.poll_scf_listener()` → `listener_base.run_all()`. Draining first means a backlog clears in order rather than newest-first.
+
 `run_due_tasks(now)` compares `next_time <= now`, both naive local, then:
 
 1. Print. **If the print fails, nothing else happens** — `next_time` is left

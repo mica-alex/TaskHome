@@ -55,7 +55,7 @@ an Xcode-anchored interpreter.
 .venv/bin/python app.py          # direct, no health check
 ```
 
-Run from the repo root either way — data files resolve relative to CWD.
+Data files resolve from the **repo root**, not CWD, so it does not matter where you run from. Override with `TASKHOME_DATA_DIR` — which means "the data lives here", not "go and fetch it from the repo root".
 
 - Serves on `http://0.0.0.0:5000` by default — reachable by the whole LAN, no auth.
 - **Host and port are configurable**: `TASKHOME_HOST` / `TASKHOME_PORT`
@@ -67,14 +67,22 @@ Run from the repo root either way — data files resolve relative to CWD.
   System Settings → General → AirDrop & Handoff. The committed IDE run
   configurations set `TASKHOME_PORT=5001` for this reason; deployments leave it
   unset and serve on 5000.
-- The scheduler thread starts on import, before the server binds.
-- The printer (Epson TM-T20III, USB `04b8:0e27`) may be absent; the app runs
-  fine and logs "Printer not connected, skipping print". Occurrences are no
-  longer lost: a task stays due and retries each tick, and an SCF issue is left
-  out of the seen set so the next overlapping window picks it up. A durable
-  queue that survives restarts is still MASTER_PLAN `P6-3`.
-- Do not run under a multi-worker WSGI server or with the Flask reloader as-is:
-  each import starts another scheduler → duplicate prints (MASTER_PLAN `P0-12`).
+- The scheduler thread starts only when the entry point asks for it
+  (`create_app(with_scheduler=True)`), and `start_scheduler()` refuses a second
+  one in the same process.
+- The printer (Epson TM-T20IIIL, USB `04b8:0e27`) may be absent; the app runs
+  fine and logs "Printer not connected, skipping print". Nothing is lost:
+  - a **task** stays due and retries each tick, and `next_time` is persisted,
+    so that survives a restart;
+  - a **listener** receipt becomes a durable job in `data/queue.json`, drained
+    at the top of each tick. Its polling window has already moved past the
+    item, so the queue is the only thing that remembers it.
+  A task print is deliberately *not* queued as well — doing both gave the
+  occurrence two retry mechanisms and printed it twice when the printer
+  returned.
+- Do not run under a multi-worker WSGI server: workers share neither the lock
+  nor the in-memory state, and each would drive its own scheduler → duplicate
+  prints (MASTER_PLAN `P0-12`).
 - macOS USB note: pyusb needs libusb (`brew install libusb`). No kernel-driver
   detach is needed on macOS for this printer.
 
@@ -113,11 +121,20 @@ and `extensions.json`.
 
 Install dev dependencies first with `.venv/bin/pip install -r requirements-dev.txt`.
 
-The suite needs **no printer and no network**. `tests/conftest.py` sets
-`TASKHOME_NO_INIT=1` before importing `app`, so importing the module neither
-reads your real JSON files nor starts the scheduler thread; fixtures then
-substitute a fake printer and a fake HTTP layer. Nothing it does can emit paper
-or touch `tasks.json`.
+The suite needs **no printer and no network**. Importing `taskhome` has no
+side effects at all, and tests build the app through `create_app(load=False,
+with_scheduler=False)`, so nothing reads your real JSON files or starts a
+thread. Two autouse fixtures in `tests/conftest.py` enforce it:
+
+- one **fails the test** if any real JSON file changes;
+- one replaces the escpos device constructor and **fails the test** if it is
+  reached. Raising alone is not enough — the print paths have broad excepts
+  that swallow it, which is how a test suite once printed a real receipt.
+
+`tests/test_static_analysis.py` runs pyflakes over the tree as a test. It
+exists because the package split introduced three defects no behavioural test
+could catch: a missing import inside a loop that never terminates, and two
+duplicate definitions where the dead copy had a corrupted store name.
 
 If you add a test that exercises persistence, point the file constants at
 `tmp_path` as `tests/test_persistence.py` does — never at the repo root.
@@ -203,7 +220,7 @@ for the unit in use are recorded in [printing.md](printing.md).
 root, gitignored, and are the only persistent state. Schemas in
 [data-model.md](data-model.md).
 
-**Back them up** — there is still no second copy (MASTER_PLAN `P6-2`), though
+**Back them up** — pre-image backups are automatic (see above), but they live on the same disk, though
 the two mechanisms that turned a small problem into a large one are fixed:
 writes are atomic (temp file + fsync + rename), and a store that fails to load
 is **write-blocked**, so a corrupt-but-repairable file is never overwritten with

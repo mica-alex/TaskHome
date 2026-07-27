@@ -1,126 +1,197 @@
 # Architecture Overview
 
-## Process model
+## Shape
 
-TaskHome is a single Python process containing:
+`app.py` is a 20-line entry point. The application is the `taskhome` package,
+assembled by an app factory:
 
-1. **The Flask app** — serves the web UI on `0.0.0.0:5000` via Flask's built-in
-   development server (`app.run`, `app.py:543`). No WSGI server, no workers, no
-   reloader (debug is not enabled).
-2. **The scheduler thread** — one daemon thread running `scheduler_loop()`
-   forever. It is created and started at **module import time**
-   (`app.py:561-563`), immediately after `load_data()`. This means importing
-   `app.py` under any multi-worker or auto-reload setup would start duplicate
-   schedulers and produce duplicate physical prints (see MASTER_PLAN `P0-12`).
+```python
+create_app(load=True, with_scheduler=False)
+```
 
-All state is module-level global Python objects (`config`, `tasks`, `history`,
-`listeners`, `app.py:32-35`) shared between the scheduler thread and Flask's
-request-handler threads **without any locking** (MASTER_PLAN `P0-5`).
+**Importing the package has no side effects.** No data is read, no thread is
+started, no printer is opened. That is deliberate and load-bearing: before the
+package split, `import app` started a scheduler, which meant a maintenance
+script or a stray test could fire real receipts against live data. Two scripts
+did exactly that.
+
+`start_scheduler()` refuses to start a second thread in the same process, so a
+double `create_app(with_scheduler=True)` cannot produce duplicate prints.
+
+Serving is via Flask's built-in server — no WSGI server, no workers, no
+reloader.
+
+## Modules
+
+See `taskhome/README.md` for the full table. The layering:
+
+```
+constants ──► state ──► storage ──► everything else
+                 │
+                 ├── recurrence ──┐
+                 ├── receipt ─────┤
+                 ├── layouts ─────┼──► printing ──► queue
+                 ├── styles ──────┘        │
+                 │                          ▼
+                 ├── listeners/base ──► listeners/{scf,nws}
+                 │                          │
+                 └── web/{routes,pwa} ◄─────┘
+                            ▲
+                       scheduler
+```
+
+`state.py` holds the only mutable globals — `config`, `tasks`, `history`,
+`listeners`, `STATE_LOCK`, `load_failed`. **Cross-module access goes through
+the module object** (`state.tasks`), never `from .state import tasks`:
+rebinding a name imported the second way is invisible to every other module.
 
 ## Data flow
 
 ```mermaid
 flowchart TB
-    subgraph disk [JSON files - CWD-relative, gitignored]
-        CFG[config.json]
+    subgraph external [External]
+        SCF[SeeClickFix API]
+        NWS[weather.gov + zippopotam]
+    end
+
+    subgraph app [taskhome]
+        SCHED[scheduler_loop<br/>every 60s]
+        Q[queue.drain]
+        TASKS[run_due_tasks]
+        LSN[listeners.base.run_all]
+        PRINT[printing.print_blocks]
+        WEB[web.routes / web.pwa]
+    end
+
+    subgraph disk ["data/ — anchored to the repo root"]
+        CONF[config.json]
         TSK[tasks.json]
-        HST[history.json]
-        LSN[listeners.json]
+        HIST[history.json]
+        LIS[listeners.json]
+        QJ[queue.json]
+        CACHE[cache/]
+        BKP[backups/]
+        STY[styles/]
     end
 
-    subgraph proc [Python process]
-        GLOB["Global state<br/>config / tasks / history / listeners"]
-        SCHED["scheduler_loop() thread<br/>(60s tick, daemon)"]
-        ROUTES["Flask routes<br/>(request threads)"]
-        PRINT["print_task() / print_scf_issue()"]
-    end
+    PRINTER([Epson TM-T20IIIL<br/>USB 04b8:0e27])
 
-    SCF[("SeeClickFix API<br/>seeclickfix.com/api/v2/issues")]
-    PRINTER[["Epson TM-T20III<br/>USB 04b8:0e27"]]
-    BROWSER((Browser<br/>LAN clients))
-
-    CFG & TSK & HST & LSN -- "load_data() at import" --> GLOB
-    GLOB -- "save_*() whole-file rewrite" --> disk
-    SCHED --> GLOB
-    ROUTES --> GLOB
-    SCHED -- "due task / new issue" --> PRINT
-    ROUTES -- "/test_print, /test_scf_print" --> PRINT
-    SCHED -- "GET issues (after=last_check)" --> SCF
-    PRINT -- "ESC/POS over USB" --> PRINTER
-    PRINT -- "prepend to history" --> GLOB
-    BROWSER -- "form POST + redirect" --> ROUTES
+    SCHED --> Q --> PRINT
+    SCHED --> TASKS --> PRINT
+    SCHED --> LSN
+    SCF --> LSN
+    NWS --> LSN
+    LSN --> PRINT
+    PRINT --> PRINTER
+    PRINT -.->|listener print failed| QJ
+    QJ --> Q
+    TASKS <--> TSK
+    LSN <--> LIS
+    LSN <--> CACHE
+    PRINT --> HIST
+    WEB <--> CONF
+    WEB <--> TSK
+    WEB <--> HIST
+    WEB <--> QJ
+    WEB <--> STY
+    CONF -.-> BKP
 ```
 
-## Startup sequence (import time)
+## The scheduler tick
 
-1. `load_data()` (`app.py:38-93`): reads each JSON file if present, replacing the
-   in-memory defaults. Performs implicit migrations (see
-   [data-model.md](data-model.md#implicit-migrations)). Any exception is logged
-   and swallowed — the app will happily start with partial/default state if a
-   file is corrupt.
-2. Scheduler thread starts (`app.py:562-563`).
-3. If run as `python app.py`, Flask's dev server starts (`app.py:566-543`).
+One daemon thread. `run_catchup(datetime.now())` runs once at startup under the
+configured policy, then every 60 seconds:
 
-## Scheduler thread lifecycle
+1. **`queue.drain()`** — first, so a backlog clears in order before more is
+   added to it. Draining last would print a long outage newest-first.
+2. **`run_due_tasks(now)`** — fire anything due.
+3. **`scf.poll_scf_listener(now_utc)`** — the bespoke SeeClickFix listener.
+4. **`listener_base.run_all(now_utc)`** — every listener on the plugin
+   interface.
 
-`scheduler_loop()` (`app.py:303-397`) has two phases:
+Each task has its own `try`, so one malformed task cannot stall the rest of the
+tick (`P0-6`). `run_all` isolates each listener for the same reason.
 
-**Phase A — startup catch-up (runs once).** For every enabled task, while its
-`next_time` (parsed naive, then force-tagged UTC via `.replace(tzinfo=timezone.utc)`)
-is before `datetime.now(timezone.utc)`, advance it with `calculate_next()`.
-Missed occurrences are **skipped silently, never printed**. Then `save_tasks()`.
-Two significant defects live here: the naive-as-UTC comparison disagrees with the
-steady-state loop's local-time comparison, and non-advancing tasks (one-off
-`recurring: "none"` in the past, or `custom` with no matching days) make this
-loop spin forever, killing the scheduler before it ever ticks. See
-[scheduling.md](scheduling.md) and MASTER_PLAN `P0-1`/`P0-2`/`P0-3`.
+Times are **naive local wall-clock** in steps 1–2 and **aware UTC** in 3–4.
+That is not an inconsistency: a chore reminder is a wall-clock time and a
+listener watermark is an instant. See [scheduling.md](scheduling.md).
 
-**Phase B — steady state (every 60 seconds).** One big `try` per tick:
+## Failure handling
 
-1. For each enabled task (iterating a shallow copy `tasks[:]`): if
-   `next_time <= datetime.now()` (naive local), call `print_task(task)`, then
-   remove the task (if `recurring == 'none'`) or advance `next_time` via
-   `calculate_next`, then `save_tasks()`. Note the schedule advances **whether or
-   not the print succeeded** — a disconnected printer means the occurrence is
-   lost (MASTER_PLAN `P0-4`).
-2. If `listeners['scf']` exists, is enabled, and has non-empty `request_types`,
-   and at least `interval` minutes have elapsed since `last_check`: fetch new
-   issues from the SeeClickFix API and print each one (details in
-   [listeners.md](listeners.md)).
-3. Sleep 60s.
+The through-line: **paper is irreversible**, so every path has to decide
+whether its failure mode is "print twice" or "never print", and neither is
+acceptable silently.
 
-Because one `try/except` wraps both steps, a single task with an unparseable
-`next_time` aborts the rest of the tick — every tick — starving later tasks and
-the SCF check (MASTER_PLAN `P0-6`).
+- **A print returns whether paper came out.** The scheduler advances a schedule
+  only on `True` (`P0-4`); a listener marks an item seen only once handled; the
+  test-print routes report the real outcome (`P0-10`).
+- **A failed *listener* print is queued.** Its polling window has already moved
+  past the item, so without the queue it is simply gone.
+- **A failed *task* print is not queued.** The task staying due is already a
+  durable retry — `next_time` is untouched and persisted. Doing both gave one
+  occurrence two retry mechanisms, and when the printer came back the queue
+  drained the receipt while the still-due task printed it again.
+- **Queued jobs are parked, never dropped**, after `MAX_ATTEMPTS`. A receipt
+  that cannot print is something the owner needs to know about.
+- **Writes are atomic** (temp file + fsync + `os.replace`) and a store that
+  failed to load is **write-blocked**. A `load_data()` that swallowed an
+  exception and left `tasks = []` — followed by an unconditional `save_tasks()`
+  — is how a real `tasks.json` was once destroyed.
+- **A listener's backoff does not advance its watermark**, so an outage delays
+  items rather than skipping them.
+- **The printer handle is released through a context manager** (`P0-11`).
+  Closing only on the success path leaked the claimed USB interface on any
+  mid-receipt exception, and enough of those stop the device opening until it
+  is physically replugged.
 
-## Request flow
+## Concurrency
 
-All pages are classic server-rendered Jinja: GET renders template from global
-state; POST mutates globals, calls `save_*()`, and redirects back
-(Post/Redirect/Get). The two exceptions are `/test_print` and `/test_scf_print`,
-which return raw HTML strings; `settings.html` calls them via `fetch()` and
-sniffs the response text for the word `successful` to pick a toast
-(`templates/settings.html:77-102`).
+`state.STATE_LOCK` guards mutation shared between the scheduler thread and
+Flask's request handlers. Mutations are made **in place** (`state.tasks[:] =
+remaining`, `del state.history[:]`) rather than by rebinding, so other modules
+holding a reference through `state` see them.
 
-The front end depends on three CDNs (Materialize CSS/JS, Google Material Icons,
-flatpickr — `templates/base.html:8-12,48-50`). Offline, selects become unusable
-because the old `styles.css` hid native `<select>`s pending
-Materialize's replacement (MASTER_PLAN `P0-15`).
+Do not run under a multi-worker WSGI server: workers do not share the lock or
+the in-memory state, and each would drive its own scheduler. One process.
 
-## Printing layer
+## Front end
 
-Each print opens the USB device fresh: `Usb(0x04b8, 0x0e27, profile='TM-T20II')`
-— the TM-T20**II** escpos profile is used for the physical TM-T20**III**; it is
-close enough to work. `is_printer_connected()` (a `usb.core.find` probe) is
-checked first, then the device is opened separately — a TOCTOU window, and on
-any exception mid-print the handle is never closed (MASTER_PLAN `P0-11`).
-Successful prints are prepended to `history` (capped at `config['max_history']`)
-and persisted. Full layouts in [printing.md](printing.md).
+No CDNs and no runtime downloads — this is a LAN appliance that must work with
+no internet (`P0-15`). Materialize and flatpickr were retired entirely
+(`P2A-4`), dropping ~390 KB and a class of "the library styled it differently
+than we did" bugs. What remains is the Mica design language
+([design.md](design.md)), native `<dialog>` and `datetime-local`, and vendored
+Inter + Material Icons.
 
-## What is *not* here
+Two blueprints:
 
-- No authentication, no CSRF protection, no HTTPS — trust model is "my LAN".
-- No tests, no requirements.txt, no CI, no packaging.
-- No print queue: prints happen inline in the scheduler tick or request thread.
-- No listener abstraction: `scf` is a hardcoded `if 'scf' in listeners:` block
-  inside the scheduler loop (`app.py:338`).
+| Blueprint | Module | Serves |
+| --- | --- | --- |
+| `main` | `web/routes.py` | Pages, form POSTs, `/api/` JSON |
+| `pwa` | `web/pwa.py` | `/manifest.webmanifest`, `/service-worker.js` |
+
+The PWA layer is split by what plain HTTP can do: the iOS install path and the
+whole manifest work over HTTP, while the service worker is gated on
+`isSecureContext` and simply does not register on a LAN address.
+
+Receipts render from **one block list** into three targets — ESC/POS, ASCII and
+HTML — so the preview cannot drift from the paper (`P3-2`).
+
+Two things are generated rather than written, and both are deliberate leverage:
+listener **settings pages** come from `CONFIG_SCHEMA`
+([listeners.md](listeners.md)), and history **badges and type filters** come
+from the listener registry. Adding a listener should touch nothing outside
+`listeners/`.
+
+## What is not here
+
+- **No database.** JSON files, loaded wholly into memory. Fine at the current
+  scale; `P1-2` proposes SQLite. `web/pagination.py` is deliberately pure
+  functions over a list so it transplants onto a query unchanged.
+- **No auth.** Anyone on the LAN can add a task and print. Deliberate for now,
+  documented in [operations.md](operations.md).
+- **No HTTPS.** Deferred by decision; it is what gates Android installability
+  and the offline shell.
+- **No CI.** Tests and pyflakes run locally — `tests/test_static_analysis.py`
+  runs pyflakes over the tree as a test, because the package split introduced
+  three defects that no behavioural test could catch.

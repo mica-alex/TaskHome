@@ -69,7 +69,8 @@ because it makes compound read-modify-write sequences correct by construction.
 ## config.json
 
 ```json
-{"max_history": 505, "hostname": "localhost", "theme": "system"}
+{"max_history": 500, "hostname": "localhost", "theme": "system",
+ "app_name": "TaskHome"}
 ```
 
 | Key | Type | Meaning | Used at |

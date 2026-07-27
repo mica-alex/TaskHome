@@ -3,7 +3,7 @@
 System-level documentation for TaskHome — a Flask app that prints scheduled task
 receipts and SeeClickFix civic-issue receipts on a USB Epson TM-T20III thermal
 printer. Written so a new contributor (or agent) can be productive without
-reading `app.py` first.
+reading `taskhome/README.md` first.
 
 Everything here describes the **actual** behavior of the code. Where behavior
 is surprising or arguably wrong, that is stated explicitly and cross-referenced
@@ -29,13 +29,18 @@ retains the original bug descriptions for the record.
 
 ## Ten-second orientation
 
-- One file: `app.py` (~1252 lines). One background daemon thread
-  (`scheduler_loop`) started at import time, suppressible with
-  `TASKHOME_NO_INIT=1`. Four JSON files as the datastore (gitignored — they
-  are the user's live data). A pytest suite that needs no printer and no
-  network.
-- Two things get printed: **tasks** (user-scheduled reminders) and **SCF issues**
-  (new SeeClickFix reports matching configured request-type IDs).
+- `app.py` is a 20-line entry point; the application is the `taskhome`
+  package. Importing it has **no side effects** — `create_app()` is an app
+  factory, and the single scheduler daemon thread starts only when asked for.
+  Five JSON files in `data/` as the datastore, plus caches, backups and receipt
+  templates (gitignored — they are the user's live data). ~570 tests that need
+  no printer and no network.
+- Three things get printed: **tasks** (user-scheduled reminders), **SCF issues**
+  (new SeeClickFix reports matching configured request types), and **NWS
+  alerts** (NOAA weather warnings for configured ZIP codes). Plus catch-up
+  summaries and anything drained from the print queue.
 - The web UI (port 5000, bound to `0.0.0.0`, no auth) manages tasks, settings,
-  and the SCF listener, and shows print history.
+  the listeners and their schema-driven settings pages, the Receipt Studio, and
+  the print queue, and shows paged print history. It installs as a home-screen
+  web app on iOS.
 - Printing is a physical side effect. Do not invoke print paths casually.

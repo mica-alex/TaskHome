@@ -1,22 +1,54 @@
 # HTTP Routes Reference
 
-All routes are unauthenticated and CSRF-unprotected. POST handlers mutate the
-global state, persist via `save_*()`, and redirect (except the two test-print
-routes, which return raw HTML strings). Form field access uses
-`request.form['x']` in several places — a missing field is a `KeyError` → HTTP
-500 (noted per route).
+All routes are unauthenticated and CSRF-unprotected. Form POST handlers mutate
+the global state, persist via `save_*()`, and redirect; the `/api/` routes
+return JSON; the two test-print routes signal outcome by status code.
+
+Two blueprints: `main` (`web/routes.py`) and `pwa` (`web/pwa.py`).
+
+### Pages
 
 | Route | Methods | Renders / Returns |
 | --- | --- | --- |
-| `/` | GET | `index.html` |
-| `/task_page` | GET | `tasks.html` |
-| `/settings` | GET, POST | `settings.html` / redirect |
-| `/test_print` | POST | raw HTML string |
-| `/test_scf_print` | POST | raw HTML string |
-| `/add_task` | POST | redirect → `/task_page` |
+| `/` | GET | `index.html` — printer status, tasks, recent history |
+| `/task_page` | GET | `tasks.html` — task CRUD, paged/filtered history |
 | `/edit_task/<task_id>` | GET, POST | `tasks.html` (edit context) / redirect |
+| `/settings` | GET, POST | `settings.html` / redirect |
+| `/settings/receipts` | GET | `receipt_studio.html` — live preview editor |
+| `/listener` | **GET** | `listener.html` — the listeners **index** |
+| `/listener/scf` | GET, POST | `listener_scf.html` / redirect |
+| `/listener/settings/<name>` | GET, POST | `listener_settings.html` — rendered from `CONFIG_SCHEMA`; 404 for an unregistered name |
+| `/queue` | GET | `queue.html` — the print queue |
+
+### Form POSTs
+
+| Route | Methods | Returns |
+| --- | --- | --- |
+| `/add_task` | POST | redirect → `/task_page` |
 | `/delete_task` | POST | redirect → `/task_page` |
-| `/listener` | GET, POST | `listener.html` / redirect |
+| `/test_print` | POST | status code (200 / 500 / 503) |
+| `/test_scf_print` | POST | status code (200 / 500 / 503) |
+
+### JSON
+
+| Route | Methods | Purpose |
+| --- | --- | --- |
+| `/api/receipt/preview` | POST | Render a template to preview rows |
+| `/api/receipt/templates/<kind>` | POST | Create/update a template |
+| `/api/receipt/templates/<kind>/<name>` | DELETE | Delete a template |
+| `/api/receipt/activate/<kind>/<name>` | POST | Make a template active |
+| `/api/receipt/test_print/<kind>` | POST | Print a sample |
+| `/api/scf/browse` | GET | Request types available at a lat/lng |
+| `/api/scf/names` | POST | Resolve request-type ids to names |
+| `/api/queue/retry` | POST | Release parked jobs and drain |
+| `/api/queue/<job_id>` | DELETE | Discard one job, or all when `job_id == 'all'` |
+
+### PWA (`pwa` blueprint)
+
+| Route | Methods | Purpose |
+| --- | --- | --- |
+| `/manifest.webmanifest` | GET | Web app manifest; `application/manifest+json` |
+| `/service-worker.js` | GET | Offline shell. Served from the **root** so its scope covers the app, and `no-cache` on itself so a stale copy cannot permanently stick |
 
 ## `GET /` — `index()`
 
@@ -96,7 +128,7 @@ Consumes `id`. Missing id → 400; unknown id → 404. Mutates the task list in
 place rather than rebinding the global. No confirmation, no undo (history is
 unaffected).
 
-## `/listener` — `listener()`
+## `/listener/scf` — `listener_scf()`
 
 - GET: renders the form from `listeners.get('scf', {})`.
 - POST: validates `interval` (integer, 1–1440) and normalises `request_types`
