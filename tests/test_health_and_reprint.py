@@ -223,3 +223,44 @@ def test_a_failed_poll_restores_the_watermark(client, monkeypatch):
     state.listeners['nws'] = {'enabled': True, 'last_check': '2026-07-27T10:00:00Z'}
     assert client.post('/api/listeners/nws/poll').status_code == 502
     assert state.listeners['nws']['last_check'] == '2026-07-27T10:00:00Z'
+
+
+def test_uids_survive_a_restart(tmp_path, monkeypatch):
+    """They are random, so leaving them in memory only mints a different set
+    on every start. A uid rendered into a page would 404 the moment the app
+    restarted -- and the page would look completely normal until it did.
+    """
+    import json
+    from taskhome import constants as c
+    monkeypatch.setattr(c, 'DATA_DIR', str(tmp_path))
+    for name, blank in (('config', '{}'), ('tasks', '[]'), ('listeners', '{}')):
+        (tmp_path / f'{name}.json').write_text(blank)
+        monkeypatch.setattr(c, f'{name.upper()}_FILE', str(tmp_path / f'{name}.json'))
+    history = tmp_path / 'history.json'
+    history.write_text(json.dumps([{'title': 'Bins', 'type': 'task'}]))
+    monkeypatch.setattr(c, 'HISTORY_FILE', str(history))
+    monkeypatch.setattr(storage, 'migrate_legacy_data_files', lambda: None)
+
+    storage.load_data()
+    first = state.history[0]['uid']
+    assert first
+
+    storage.load_data()
+    assert state.history[0]['uid'] == first, 'a restart invalidated every reprint link'
+    assert json.loads(history.read_text())[0]['uid'] == first, 'uid was not persisted'
+
+
+def test_an_scf_reprint_formats_the_timestamp(client, monkeypatch):
+    """History stores reported_at raw, as the API returned it, while the
+    receipt shows it formatted."""
+    from taskhome import receipt
+    printed = []
+    monkeypatch.setattr(printing, 'print_blocks', lambda b: printed.append(b) or True)
+    state.history.append({
+        'uid': 'scf1', 'type': 'scf', 'id': 42, 'category': 'Pothole',
+        'address': 'Elm St', 'status': 'Open', 'description': 'Big one.',
+        'reported_at': '2025-08-26T13:36:42Z', 'print_time': '2025-08-26T09:36:42'})
+    client.post('/api/history/reprint/scf1')
+    rendered = '\n'.join(receipt.render_text(printed[0]))
+    assert '2025-08-26T13:36:42Z' not in rendered, 'printed a raw ISO timestamp'
+    assert 'AM' in rendered or 'PM' in rendered

@@ -231,3 +231,43 @@ def test_preview_wraps_where_the_printer_wraps():
     out = styles.preview(template(kind='scf', blocks=[
         {'type': 'text', 'value': long_text, 'font': 'b', 'align': 'left'}]))
     assert all(len(line) <= receipt.PAGE_COLUMNS for line in out['lines'])
+
+
+# --- separators stranded by empty placeholders --------------------------------
+
+@pytest.mark.parametrize('raw,expected', [
+    ('Open  -  01:36 PM  -  ', 'Open  -  01:36 PM'),      # the SCF no-photo case
+    ('Open  -  01:36 PM  -  Photo', 'Open  -  01:36 PM  -  Photo'),
+    ('  -  Open', 'Open'),
+    ('Open  -    -  Photo', 'Open - Photo'),
+    ('Severe - ', 'Severe'),                              # NWS with no urgency
+    ('Just text', 'Just text'),
+    ('01:36 PM, 08/26/2025', '01:36 PM, 08/26/2025'),     # must not mangle a date
+])
+def test_tidy_separators(raw, expected):
+    assert styles.tidy_separators(raw) == expected
+
+
+def test_an_scf_receipt_with_no_photo_has_no_dangling_dash():
+    """The built-in template is generated with has_media=True, so it bakes in
+    '{status} - {reported} - {media}'. An issue with no photo used to print
+    'Open - 01:36 PM, 08/26/2025 -'.
+
+    A template is a flat string with no conditionals -- P3-1 chose a block list
+    over a DSL -- so this has to be handled at fill time.
+    """
+    template = styles.get_template('scf', 'scf-default')
+    blocks = styles.fill(template, styles.sample_context('scf', {'media': ''}))
+    # Text blocks only -- a rule block is legitimately a row of dashes.
+    for block in blocks:
+        if block.get('type') != 'text':
+            continue
+        assert not block['value'].rstrip().endswith('-'), \
+            f"dangling separator: {block['value']!r}"
+
+
+def test_a_receipt_with_media_still_shows_it():
+    from taskhome import receipt
+    template = styles.get_template('scf', 'scf-default')
+    blocks = styles.fill(template, styles.sample_context('scf', {'media': 'Photo'}))
+    assert 'Photo' in '\n'.join(receipt.render_text(blocks))

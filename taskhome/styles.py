@@ -363,6 +363,36 @@ def _bounded_int(value, low, high, index, field):
 
 # --- rendering ----------------------------------------------------------------
 
+#: Separators a template uses between fields on one line. When the field
+#: between two of them is empty, the separator has to go too.
+_SEPARATORS = ('-', '|', '/', '\u2014', '\u2013')
+_DANGLING_RE = re.compile(
+    r'\s*[' + ''.join(re.escape(s) for s in _SEPARATORS) + r']\s*(?=$)|'
+    r'(?<=^)\s*[' + ''.join(re.escape(s) for s in _SEPARATORS) + r']\s*')
+_DOUBLED_RE = re.compile(
+    r'\s*([' + ''.join(re.escape(s) for s in _SEPARATORS) + r'])\s*'
+    r'(?:[' + ''.join(re.escape(s) for s in _SEPARATORS) + r']\s*)+')
+
+
+def tidy_separators(text):
+    """Remove separators left stranded by an empty placeholder.
+
+    A template is a flat string with no conditionals -- deliberately, since
+    P3-1 chose a block list over a DSL -- so `{status} - {reported} - {media}`
+    has no way to say "only if there is media". Filling it for an issue with no
+    photo left "Open - 01:36 PM, 08/26/2025 -" with a dangling dash.
+
+    Fixing it here rather than in the template keeps that simplicity and covers
+    every optional field, not just this one.
+    """
+    text = _DOUBLED_RE.sub(r' \1 ', text)
+    previous = None
+    while previous != text:
+        previous = text
+        text = _DANGLING_RE.sub('', text).strip()
+    return text
+
+
 def fill(template, context):
     """Substitute placeholders, producing blocks the renderer can consume.
 
@@ -375,7 +405,7 @@ def fill(template, context):
         if 'value' in block:
             resolved = _PLACEHOLDER_RE.sub(
                 lambda m: str(context.get(m.group(1), '') or ''), block['value'])
-            resolved = resolved.strip()
+            resolved = tidy_separators(resolved.strip())
             if not resolved and block['type'] in ('text', 'qr', 'barcode'):
                 continue
             block['value'] = resolved

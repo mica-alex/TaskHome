@@ -544,10 +544,16 @@ def reprint_blocks(record):
         return styles.fill(template, styles.sample_context(kind, record))
 
     # SCF predates the plugin interface and keeps its own projection.
+    #
+    # History stores reported_at raw, as the API returned it, while the
+    # receipt shows it formatted -- so it has to go back through the same
+    # formatter or the reprint reads '2025-08-26T13:36:42Z' where the original
+    # said '9:36 AM, 08/26/2025'.
     return printing.scf_blocks(
         {'id': record.get('id'), 'html_url': record.get('url', '')},
         category=record.get('category', ''), address=record.get('address', ''),
-        status=record.get('status', ''), reported_at=record.get('reported_at', ''),
+        status=record.get('status', ''),
+        reported_at=printing.scf_reported_at({'created_at': record.get('reported_at')}),
         has_media=record.get('has_media', False),
         has_video=record.get('has_video', False),
         description=record.get('description', ''))

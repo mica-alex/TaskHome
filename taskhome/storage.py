@@ -172,6 +172,7 @@ def load_data():
     loaded_history, ok = _load_json_file('history', os.path.abspath(constants.HISTORY_FILE), None)
     if ok and loaded_history is not None:
         state.history = loaded_history
+        backfilled = 0
         for item in state.history:  # Add type to existing state.history if missing
             if 'type' not in item:
                 item['type'] = 'task'
@@ -181,6 +182,14 @@ def load_data():
             # an identity once the list is filtered, paged or trimmed.
             if 'uid' not in item:
                 item['uid'] = uuid.uuid4().hex
+                backfilled += 1
+        if backfilled:
+            # Persisted immediately, because these are random. Leaving them in
+            # memory only would mint a different set on every start, so a uid
+            # rendered into a page would 404 the moment the app restarted --
+            # and the page would look completely normal until it did.
+            log.info(f"Assigned ids to {backfilled} older history record(s)")
+            save_history()
         log.debug(f"Loaded {len(state.history)} state.history records")
 
     listeners_path = os.path.abspath(constants.LISTENERS_FILE)
