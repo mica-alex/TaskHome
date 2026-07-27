@@ -3,7 +3,12 @@
 `scf` predates the plugin interface and still runs through its own function;
 `nws` is built on `base.Listener`, which provides interval gating, watermarks,
 dedup, backoff, per-poll caps and the settings schema (P5-1).
-"""
-from . import base, nws, scf
 
-__all__ = ['base', 'nws', 'scf']
+`webhook` is a **push** listener: nothing polls it, and items arrive through
+base.deliver() from an inbound HTTP request. It shares the whole tail of the
+pipeline -- dedup, caps, filtering, templates, history, queue-on-failure -- so
+a pushed receipt behaves exactly like a polled one.
+"""
+from . import base, feeds, nws, scf, webhook
+
+__all__ = ['base', 'feeds', 'nws', 'scf', 'webhook']

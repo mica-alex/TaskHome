@@ -153,3 +153,42 @@ def test_static_urls_are_version_stamped(client, path):
     body = client.get(path).get_data(as_text=True)
     for href in re.findall(r'(?:href|src)="(/static/[^"]+)"', body):
         assert f'v={constants.VERSION}' in href, f'unstamped asset: {href}'
+
+
+# --- mobile card view (P2-9 / P2B-6) -----------------------------------------
+
+def test_tables_collapse_to_cards_on_a_phone():
+    """Below 600px a six-column table either scrolls sideways -- header
+    scrolling away from its own values -- or squeezes every column to
+    unreadable width."""
+    import pathlib
+    css = pathlib.Path('taskhome/static/mica.css').read_text()
+    assert '@media (max-width: 600px)' in css
+    assert '.mica-table td[data-label]::before' in css, 'no per-cell labels'
+
+
+def test_the_header_stays_available_to_screen_readers_on_mobile():
+    """Hiding thead with display:none would break the header association that
+    a screen reader relies on."""
+    import pathlib
+    css = pathlib.Path('taskhome/static/mica.css').read_text()
+    mobile = css[css.index('@media (max-width: 600px)'):]
+    thead = mobile[mobile.index('.mica-table thead'):]
+    rule = thead[:thead.index('}')]
+    assert 'display: none' not in rule
+    assert 'clip:' in rule or 'position: absolute' in rule
+
+
+@pytest.mark.parametrize('path', ['/task_page', '/'])
+def test_data_cells_carry_their_own_label(client, path):
+    """The label comes from the cell, so adding a column cannot leave a row
+    silently mislabelled on mobile."""
+    import re
+    body = client.get(path).get_data(as_text=True)
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', body, re.S)
+    data_rows = [r for r in rows if '<td' in r and 'empty-state' not in r]
+    for row in data_rows:
+        cells = re.findall(r'<td([^>]*)>', row)
+        labelled = [c for c in cells if 'data-label' in c]
+        # At least one unlabelled cell (the row heading) and the rest labelled.
+        assert labelled, f'no labelled cells in a row on {path}'

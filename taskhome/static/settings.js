@@ -138,3 +138,45 @@
         if (hidden) hidden.value = checked.join(',');
     });
 })();
+
+/*
+ * Notice panels (P5-2). A listener can surface something to copy or an action
+ * to run -- the webhook's URL and token rotation. Generic on purpose: the next
+ * listener that needs a notice gets this for free.
+ */
+(function () {
+    'use strict';
+
+    document.addEventListener('click', function (e) {
+        var copy = e.target.closest('[data-copy]');
+        if (copy) {
+            var text = copy.dataset.copy;
+            // clipboard API needs a secure context; over plain HTTP on a LAN it
+            // is undefined, so fall back rather than failing silently.
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text)
+                    .then(function () { window.toast && toast('Copied.'); })
+                    .catch(function () { prompt('Copy this URL:', text); });
+            } else {
+                prompt('Copy this URL:', text);
+            }
+            return;
+        }
+
+        var action = e.target.closest('[data-notice-action]');
+        if (action) {
+            if (action.dataset.confirm && !confirm(action.dataset.confirm)) return;
+            action.disabled = true;
+            fetch(action.dataset.noticeAction, {method: 'POST'})
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d.ok) throw new Error(d.error || 'Failed.');
+                    location.reload();
+                })
+                .catch(function (err) {
+                    action.disabled = false;
+                    window.toast ? toast(err.message, 'error') : alert(err.message);
+                });
+        }
+    });
+})();

@@ -1007,3 +1007,120 @@ main:focus-visible { outline: none; }
 
 /* The last rows' menus would otherwise be clipped by the scroll container. */
 .mica-table-scroll:has(.row-menu[open]) { overflow: visible; }
+
+/* --- Listener notices (P5-2) --------------------------------------------- */
+
+.listener-notice {
+    border: 1px solid var(--mica-accent);
+    border-radius: var(--mica-radius-md, 8px);
+    padding: var(--mica-space-4);
+    margin-bottom: var(--mica-space-5);
+    background: color-mix(in srgb, var(--mica-accent) 6%, transparent);
+}
+.listener-notice h3 { margin: 0 0 4px; font-size: var(--mica-text-h6); }
+.notice-code {
+    background: var(--mica-bg);
+    border: 1px solid var(--mica-divider);
+    border-radius: 6px;
+    padding: 10px 12px;
+    /* A URL with a 43-character token will not wrap on its own and would push
+     * the whole card wide. */
+    overflow-x: auto;
+    font-size: var(--mica-text-caption);
+    margin: var(--mica-space-3) 0;
+}
+
+/* --- Tables become cards on a phone (P2-9 / P2B-6) ----------------------- */
+
+/*
+ * Below 600px a six-column table either scrolls sideways (so half the data is
+ * invisible and the header scrolls away from its own values) or squeezes every
+ * column to unreadable width. Neither is usable one-handed.
+ *
+ * Each row becomes a card, and each cell carries its own label via a
+ * data-label attribute rendered as ::before. The markup is unchanged, so this
+ * is presentation only -- the same HTML remains a real table for a screen
+ * reader and on a laptop.
+ */
+@media (max-width: 600px) {
+    .mica-table-scroll { overflow-x: visible; }
+
+    .mica-table thead {
+        /* Hidden visually but not from assistive tech, which still needs the
+         * header association. */
+        position: absolute; width: 1px; height: 1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    }
+
+    .mica-table, .mica-table tbody, .mica-table tr, .mica-table td {
+        display: block; width: 100%;
+    }
+
+    .mica-table tr {
+        border: 1px solid var(--mica-divider);
+        border-radius: var(--mica-radius-md, 8px);
+        padding: var(--mica-space-3);
+        margin-bottom: var(--mica-space-3);
+        background: var(--mica-bg-elevated);
+    }
+    .mica-table tr:hover { background: var(--mica-bg-elevated); }
+
+    .mica-table td {
+        border: none;
+        padding: 4px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--mica-space-3);
+        text-align: right;
+    }
+
+    /* The label comes from the cell itself, so adding a column cannot leave a
+     * row silently mislabelled on mobile. */
+    .mica-table td[data-label]::before {
+        content: attr(data-label);
+        color: var(--mica-text-secondary);
+        font-size: var(--mica-text-caption);
+        text-align: left;
+        flex: 0 0 auto;
+    }
+
+    /* A cell with no label is the row's primary content: give it the full
+     * width and the visual weight of a heading. */
+    .mica-table td:not([data-label]) {
+        text-align: left;
+        font-weight: 600;
+        padding-bottom: var(--mica-space-2);
+    }
+
+    .mica-table td.row-actions { justify-content: flex-end; }
+    .mica-table caption { display: block; }
+
+    /* An empty state should not look like a card with one blank field. */
+    .mica-table td.empty-state {
+        display: block; text-align: center; font-weight: 400;
+    }
+
+    /* The receipt preview is a fixed-width artefact; shrink rather than
+     * reflow, or the 64-column grid stops meaning anything. */
+    .receipt-preview { font-size: 10px; }
+
+    .mica-grid-2 { grid-template-columns: 1fr; }
+    .listener-grid { grid-template-columns: 1fr; }
+    .studio-actions { flex-wrap: wrap; }
+    .history-filter { flex-direction: column; align-items: stretch; }
+}
+
+/* The appbar collapses at the site's own breakpoint (P2A-3). Below it the nav
+ * becomes a scrollable strip rather than disappearing -- a home-screen web app
+ * with no way to reach Settings is worse than a slightly busy header. */
+@media (max-width: 900px) {
+    .mica-appbar { flex-wrap: wrap; gap: var(--mica-space-2); }
+    .mica-nav {
+        order: 3; width: 100%;
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .mica-nav::-webkit-scrollbar { display: none; }
+    .mica-nav a { white-space: nowrap; }
+}

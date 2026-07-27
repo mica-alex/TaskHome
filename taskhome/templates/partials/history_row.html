@@ -7,13 +7,13 @@
   two templates, and nothing failed when it was not done.
 #}
 <tr>
-  <td>
+  <td data-label="Type">
     <span class="mica-chip badge-{{ item.type | default('task') }}">
       {{ history_label(item) }}
     </span>
   </td>
   <td>{{ history_title(item) }}</td>
-  <td>{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
+  <td data-label="Printed">{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
   {% if show_reprint %}
   <td class="row-actions">
     {# Rebuilt from today's active template, not replayed byte-for-byte: the

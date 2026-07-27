@@ -58,6 +58,14 @@ class Listener:
     default_interval = 10
     max_prints_per_poll = 20
 
+    #: A push listener is handed items by something else -- an inbound HTTP
+    #: request, an MQTT subscription -- rather than fetching them on a timer.
+    #: The runtime skips it during the poll sweep, but everything downstream
+    #: of poll() (dedup, caps, should_print, templates, queueing) is shared,
+    #: which is the whole point of putting the distinction here rather than
+    #: bolting a second pipeline alongside.
+    accepts_push = False
+
     # --- to implement --------------------------------------------------------
 
     def poll(self, config, since):
@@ -231,6 +239,15 @@ class Listener:
         """One line describing the current configuration, for the index."""
         return ''
 
+    def notice(self):
+        """An optional panel on the settings page: {title, body, code, action}.
+
+        For the thing a listener needs to *tell* you rather than ask you --
+        the webhook's URL is useless as a form field, since it is derived and
+        the only sane interaction is copying it.
+        """
+        return None
+
     def parse_form(self, form):
         """Turn a submitted form into schema values.
 
@@ -369,6 +386,9 @@ def run(listener, now_utc, printer=None):
     config = listener.config()
     if not config.get('enabled'):
         return 0
+    if listener.accepts_push:
+        # Nothing to poll. Its items arrive through deliver().
+        return 0
 
     runtime = listener.state()
     backoff_until = parse_utc(runtime.get('backoff_until'))
@@ -476,6 +496,76 @@ def run(listener, now_utc, printer=None):
     runtime.pop('last_error', None)
     storage.save_listeners()
     log.info(f"{listener.title}: {len(items)} fetched, {len(fresh)} new, {printed} printed")
+    return printed
+
+
+def deliver(listener, items, now_utc=None):
+    """Print items handed to a push listener. Returns the number handled.
+
+    Shares the tail of run(): dedup, the per-delivery cap, should_print, the
+    active template, history, and queueing on a failed print. A push listener
+    that printed directly would have to reimplement all of it, and would get
+    the queueing wrong -- which is the part that loses receipts.
+    """
+    from .. import printing, queue, styles
+    from datetime import datetime, timezone
+
+    now_utc = now_utc or datetime.now(timezone.utc)
+    config = listener.config()
+    runtime = listener.state()
+    seen = runtime.get('seen') or []
+    seen_set = set(seen)
+
+    fresh = []
+    for item in items:
+        key = listener.dedup_key(item)
+        if key is None or key in seen_set:
+            continue
+        seen_set.add(key)
+        fresh.append(item)
+
+    cap = listener.max_prints_per_poll
+    if len(fresh) > cap:
+        log.warning(f"{listener.title}: capped at {cap}, dropping {len(fresh) - cap}")
+        fresh = fresh[:cap]
+
+    printed = 0
+    for item in fresh:
+        try:
+            wanted, reason = listener.should_print(config, item)
+        except Exception as e:
+            log.error(f"{listener.title}: filter failed, printing anyway: {e}")
+            wanted, reason = True, ''
+        if not wanted:
+            log.info(f"{listener.title}: skipping {listener.describe(item)} -- {reason}")
+            seen.append(listener.dedup_key(item))
+            continue
+
+        name = listener.template_name(config, item)
+        template = None
+        if listener.name in styles.kinds():
+            try:
+                template = styles.get_template(
+                    listener.name, name or styles.active_template_name(listener.name))
+            except Exception as e:
+                log.warning(f"{listener.title}: template unusable ({e})")
+
+        blocks = (styles.fill(template, listener.context(item)) if template
+                  else listener.receipt_blocks(item))
+
+        if printing.print_blocks(blocks):
+            printing.record_history(listener.history_record(item))
+        else:
+            queue.enqueue(listener.name, blocks,
+                          description=listener.describe(item),
+                          history=listener.history_record(item))
+        seen.append(listener.dedup_key(item))
+        printed += 1
+
+    del seen[:-2000]
+    runtime['seen'] = seen
+    runtime['last_delivery'] = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+    storage.save_listeners()
     return printed
 
 

@@ -3,10 +3,12 @@
 A "listener" polls an external source and prints new items as receipts. There
 are two:
 
-| Name | Source | Built on |
-| --- | --- | --- |
-| `scf` | SeeClickFix civic issues | Bespoke — predates the plugin interface |
-| `nws` | NOAA / National Weather Service alerts | `listeners/base.Listener` |
+| Name | Source | Style | Built on |
+| --- | --- | --- | --- |
+| `scf` | SeeClickFix civic issues | poll | Bespoke — predates the plugin interface |
+| `nws` | NOAA / National Weather Service alerts | poll | `base.Listener` |
+| `feeds` | RSS / Atom digest | poll | `base.Listener` |
+| `webhook` | Anything that can POST | **push** | `base.Listener` |
 
 `listeners/base.py` is the plugin interface (`P5-1`). SeeClickFix still runs
 through `poll_scf_listener()` because it was written first; everything new
@@ -319,6 +321,72 @@ Every registered listener is an editable kind in the Receipt Studio
 If a template is missing or unusable at print time the listener falls back to
 `receipt_blocks()` and logs it. A weather alert must not be lost because
 someone deleted a template.
+
+## Push listeners
+
+A listener with `accepts_push = True` is handed items rather than fetching
+them. The poll sweep skips it, and `base.deliver()` runs the same tail as a
+polled listener — dedup, per-delivery cap, `should_print`, the active template,
+history, and queueing on a failed print.
+
+That sharing is the point. A push path that printed directly would have to
+reimplement all of it, and would get the queueing wrong — which is the part
+that loses receipts.
+
+### Webhook (`listeners/webhook.py`)
+
+`POST /api/inbound/<token>` with `{"title": "...", "body": "..."}`, or just
+plain text. One endpoint that makes TaskHome a printer for Apple Shortcuts,
+Home Assistant, IFTTT, cron, or three lines of curl.
+
+```sh
+curl -X POST http://taskhome.local:5000/api/inbound/YOUR_TOKEN \
+  -d '{"title": "Bins tonight", "body": "Green bin and recycling."}'
+```
+
+Honest about what the security is: a shared secret in a URL, over a LAN, with
+no TLS. If the network is hostile the token is visible. What it buys is that a
+stray request to a scanned port cannot print, and a leaked token rotates
+without touching anything else.
+
+- A wrong token returns **404, not 403**, so scanning cannot distinguish "no
+  such endpoint" from "right endpoint, wrong secret".
+- An empty configured token never matches, or enabling the listener before
+  generating one would leave the endpoint open.
+- **The rate limit matters more than the authentication.** The failure that
+  actually costs something is a stuck script retrying every second overnight —
+  thousands of receipts. Default 20/hour, sliding window, `429` with
+  `Retry-After`.
+- Titles and bodies are truncated rather than refused: a 4 MB log would print
+  until the roll ran out, but refusing outright loses a legitimate long message.
+
+## The RSS digest listener (`listeners/feeds.py`)
+
+**One receipt per digest, not one per article.** A feed with forty items a day
+would otherwise bury the room in paper, and forty receipts are harder to read
+than one list. `max_prints_per_poll = 1` enforces it.
+
+Parsed with `xml.etree` rather than feedparser — the subset that matters is a
+dozen lines, and an appliance that must keep working untouched for years is
+better off without the dependency. Both RSS and Atom, verified against BBC News
+(RSS), Reddit and GitHub releases (Atom).
+
+Three behaviours worth knowing:
+
+- **The first poll of a feed prints nothing.** Everything in it is "new" on
+  first sight, and a busy feed carries 30–40 items — printed a few per digest,
+  that is a week of catching up on old news. The backlog is marked seen and the
+  digest starts from the next thing published. Same call SCF's catch-up policy
+  makes, for the same reason.
+- **Conditional requests.** ETag and Last-Modified are stored per feed and sent
+  back; a feed polled hourly is almost always unchanged, and some publishers
+  rate-limit clients that ignore this.
+- **One dead feed does not stop the digest.** Failures are recorded and shown
+  in the summary; the other feeds still print.
+
+The source line under each headline uses a `-` prefix rather than indentation,
+because `wrap()` strips leading whitespace — spaces would vanish and the source
+would read as a second headline.
 
 ## The NOAA weather listener (`listeners/nws.py`)
 

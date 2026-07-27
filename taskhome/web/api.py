@@ -349,6 +349,66 @@ def test_print():
     return fail('The print failed. Check the printer and the log.', 500)
 
 
+@bp.route('/inbound/<token>', methods=['POST'])
+def inbound(token):
+    """Print whatever was POSTed here (P5-2 #1).
+
+    Deliberately permissive about its input -- a JSON object, or a bare string,
+    because half the things that will call this are a shell script with
+    `-d "Bins tonight"`. Deliberately strict about everything else.
+
+    Responses say as little as possible to an unauthenticated caller: a wrong
+    token gets 404, not 403, so scanning cannot distinguish "no such endpoint"
+    from "right endpoint, wrong secret".
+    """
+    from ..listeners import webhook
+
+    listener = webhook.listener
+    config = listener.config()
+
+    if not config.get('enabled') or not listener.check_token(config, token):
+        log.warning('Rejected inbound webhook (disabled or bad token)')
+        return fail('Not found.', 404)
+
+    allowed, used, limit = listener.within_rate_limit(config)
+    if not allowed:
+        # 429 with a Retry-After, so a well-behaved client backs off rather
+        # than hammering. The limit exists for stuck loops, not attackers.
+        log.warning(f'Webhook rate limit reached ({used}/{limit} this hour)')
+        response = fail(f'Rate limit reached ({limit} per hour).', 429)
+        response[0].headers['Retry-After'] = '3600'
+        return response
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        raw = request.get_data(as_text=True).strip()
+        payload = raw or (request.form.to_dict() or None)
+    if payload is None:
+        return fail('Send a JSON object, a form, or plain text.')
+
+    try:
+        item = listener.parse(payload)
+    except ValueError as e:
+        return fail(str(e))
+
+    listener.note_delivery()
+    printed = listener_base.deliver(listener, [item])
+    if not printed:
+        # Filtered out by allow_sources. Reported honestly rather than as
+        # success, or a misconfigured filter looks like a working webhook.
+        return ok({'printed': 0, 'reason': 'filtered'})
+    return ok({'printed': printed, 'title': item['title']})
+
+
+@bp.route('/webhook/token', methods=['POST'])
+def rotate_webhook_token():
+    """Generate a new token, invalidating the old one."""
+    from ..listeners import webhook
+    token = webhook.new_token()
+    webhook.listener.save_config({'token': token})
+    return ok({'token': token})
+
+
 @bp.route('/scheduler', methods=['GET'])
 def scheduler_info():
     """What the scheduler is about to do, which is otherwise only visible by

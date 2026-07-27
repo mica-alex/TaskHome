@@ -25,6 +25,32 @@
 
   {% if error %}<div class="mica-alert mica-alert-error">{{ error }}</div>{% endif %}
 
+  {% set notice = listener.notice() %}
+  {% if notice %}
+  {# What a listener needs to tell you rather than ask you. The webhook URL is
+     derived and the only sane interaction is copying it, so it is not a form
+     field. #}
+  <div class="listener-notice">
+    <h3>{{ notice.title }}</h3>
+    {% if notice.body %}<p class="mica-help">{{ notice.body }}</p>{% endif %}
+    {% if notice.code %}
+      <pre class="notice-code"><code>{{ notice.code }}</code></pre>
+    {% endif %}
+    <div class="studio-actions">
+      {% if notice.copy %}
+        <button type="button" class="mica-btn mica-btn-secondary"
+                data-copy="{{ notice.copy }}">Copy URL</button>
+      {% endif %}
+      {% if notice.action %}
+        <button type="button" class="mica-btn mica-btn-secondary"
+                data-notice-action="{{ notice.action.endpoint }}"
+                {% if notice.action.confirm %}data-confirm="{{ notice.action.confirm }}"{% endif %}
+                >{{ notice.action.label }}</button>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <form method="POST" action="{{ url_for('main.listener_settings', name=listener.name) }}">
     {% for heading, specs in listener.groups() %}
       {% if heading %}<h2 class="settings-group">{{ heading }}</h2>{% endif %}

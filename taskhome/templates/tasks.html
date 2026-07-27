@@ -24,22 +24,22 @@
             {% if task.extra %}<div class="mica-help">{{ task.extra }}</div>{% endif %}
             {% include 'partials/task_status.html' %}
           </td>
-          <td>
+          <td data-label="Next print">
             {%- if task.enabled -%}
               {% with value = task.next_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}
             {%- else -%}
               <span class="mica-help">Paused</span>
             {%- endif -%}
           </td>
-          <td><span class="mica-chip mica-chip-muted">{{ task.recurrence_label }}</span></td>
-          <td>
+          <td data-label="Repeats"><span class="mica-chip mica-chip-muted">{{ task.recurrence_label }}</span></td>
+          <td data-label="Last printed">
             {%- if task.last_printed -%}
               {% with value = task.last_printed, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}
             {%- else -%}
               <span class="mica-help">Never</span>
             {%- endif -%}
           </td>
-          <td>
+          <td data-label="On">
             {#
               A real checkbox, not a styled div: it is keyboard reachable and
               announced correctly for free (P2-7). The label names the task,
