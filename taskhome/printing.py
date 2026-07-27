@@ -86,10 +86,27 @@ def task_blocks(task, when=None):
     return styles.fill(template, context)
 
 
+def scf_image_url(issue):
+    """The photo to print, or '' when there is none or photos are off.
+
+    Resolved here rather than in the template so that "photos are switched
+    off" and "this issue has no photo" produce the same empty placeholder --
+    fill() then drops the block entirely and leaves no gap.
+    """
+    from .listeners import scf as scf_listener
+    if not scf_listener.get_filters().get('print_photos'):
+        return ''
+    media = issue.get('media')
+    if not isinstance(media, dict):
+        return ''
+    return media.get('image_full') or ''
+
+
 def scf_blocks(issue, category, address, reported_at, status, has_media,
                has_video=False, description='', when=None):
     """Blocks for an SCF receipt, from whichever template is active."""
     context = {
+        'media_url': scf_image_url(issue),
         'category': category,
         'address': address,
         'status': status,

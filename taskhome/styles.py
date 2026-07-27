@@ -73,6 +73,10 @@ BUILTIN_PLACEHOLDERS = {
         'id': '19840471',
         'printed': '8:30 AM 7/27/26',
         'qr_url': 'https://seeclickfix.com/issues/19840471',
+        # Empty in the sample: the Studio preview should show the layout
+        # someone actually gets most of the time, and most issues have no
+        # photo or have photos switched off.
+        'media_url': '',
     },
 }
 
@@ -145,7 +149,8 @@ def builtin_template(kind, name=None):
         blocks = layouts.scf_receipt(
             {'id': '{id}', 'html_url': '{qr_url}'},
             category='{category}', address='{address}', status='{status}',
-            reported_at='{reported}', has_media=True, description='{description}')
+            reported_at='{reported}', has_media=True, description='{description}',
+            media_url='{media_url}')
         blocks = _replace_value(blocks, 'Photo', '{media}')
     return {
         'name': f'{kind}-default',
@@ -308,10 +313,29 @@ def _validate_block(block, index, known_placeholders):
     if not isinstance(block, dict):
         raise TemplateError(f'Block {index} is not an object.')
     kind = block.get('type')
-    if kind not in ('text', 'qr', 'barcode', 'rule', 'blank', 'gap'):
+    if kind not in ('text', 'qr', 'barcode', 'rule', 'blank', 'gap', 'image'):
         raise TemplateError(f'Block {index}: unknown type {kind!r}.')
 
     out = {'type': kind}
+    if kind == 'image':
+        # `src` holds a placeholder resolved at print time, so it is validated
+        # like any other value rather than as a URL -- there is no URL here yet.
+        src = block.get('src', '')
+        if not isinstance(src, str):
+            raise TemplateError(f'Block {index}: src must be text.')
+        unknown = set(_PLACEHOLDER_RE.findall(src)) - known_placeholders
+        if unknown:
+            raise TemplateError(
+                f"Block {index}: unknown placeholder(s) "
+                f"{', '.join('{' + u + '}' for u in sorted(unknown))}.")
+        out['src'] = src
+        out['width'] = _bounded_int(block.get('width', receipt.DEFAULT_IMAGE_DOTS),
+                                    32, receipt.PAPER_DOTS, index, 'width')
+        out['max_height'] = _bounded_int(
+            block.get('max_height', receipt.DEFAULT_IMAGE_DOTS), 32, 1200,
+            index, 'max_height')
+        out['alt'] = str(block.get('alt', 'Photo'))[:40]
+
     if kind in ('text', 'qr', 'barcode'):
         value = block.get('value', '')
         if not isinstance(value, str):
@@ -409,6 +433,14 @@ def fill(template, context):
             if not resolved and block['type'] in ('text', 'qr', 'barcode'):
                 continue
             block['value'] = resolved
+        if block['type'] == 'image':
+            # An issue with no photo should leave no gap, and certainly should
+            # not print "[Photo unavailable]" for a photo that never existed.
+            src = _PLACEHOLDER_RE.sub(
+                lambda m: str(context.get(m.group(1), '') or ''), block.get('src', ''))
+            if not src.strip():
+                continue
+            block['src'] = src.strip()
         blocks.append(block)
     return blocks
 

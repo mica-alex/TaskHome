@@ -315,12 +315,32 @@ def listener_scf():
             part.strip() for part in (request.form.get('request_types') or '').split(',')
             if part.strip())
 
+        # Filters go through the schema coercer and then SCF's own rules --
+        # notably that a keyword needs an area, because searching all of
+        # SeeClickFix does not return before the timeout.
+        try:
+            # A field the submission does not carry keeps its stored value. An
+            # older client, or a form saved before a filter existed, must not
+            # silently clear it -- and for a multiselect "absent" and "all
+            # unchecked" are the same on the wire, which is why the macro emits
+            # a hidden marker for it.
+            filters = scf.get_filters(existing)
+            for spec in scf.FILTER_SCHEMA:
+                key = spec['key']
+                if key not in request.form:
+                    continue
+                filters[key] = listener_base.coerce_field(spec, request.form.get(key))
+            scf.validate_filters(filters)
+        except ValueError as e:
+            return forms.reject(str(e))
+
         updated = dict(existing)
         updated.update({
             'enabled': 'enabled' in request.form,
             'request_types': request_types,
             'interval': interval,
             'last_check': existing.get('last_check'),  # Preserve existing last_check
+            **filters,
         })
         state.listeners['scf'] = updated
         storage.save_listeners()
@@ -335,7 +355,10 @@ def listener_scf():
         log.warning(f"Could not describe request types: {e}")
         described = []
     return render_template('listener_scf.html', config=state.config, scf=scf_config,
-                           request_types=described)
+                           request_types=described,
+                           filter_schema=scf.FILTER_SCHEMA,
+                           filters=scf.get_filters(scf_config),
+                           scf_listener=listener_base.Listener())
 
 
 @bp.route('/api/scf/browse')

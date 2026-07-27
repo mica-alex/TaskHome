@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'partials/setting_field.html' import field %}
 {% block title %}SeeClickFix{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -65,6 +66,16 @@
         works offline.
       </span>
     </div>
+
+    {#
+      The filters come from FILTER_SCHEMA through the same macro every other
+      listener uses (P2-11). Only the category picker above is bespoke, because
+      it needs a live location lookup no field type expresses.
+    #}
+    <h2 class="settings-group">Filters</h2>
+    {% for spec in filter_schema %}
+      {{ field(spec, filters.get(spec.key), listener=scf_listener, config=filters) }}
+    {% endfor %}
 
     <div class="studio-actions">
       <button type="submit" class="mica-btn">Save</button>

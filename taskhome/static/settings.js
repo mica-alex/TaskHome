@@ -118,3 +118,23 @@
     document.addEventListener('change', applyDependencies);
     applyDependencies();
 })();
+
+/*
+ * A multiselect with fixed options renders as checkboxes over a hidden comma
+ * field (P4-5). Keeping the hidden field in step is what lets the server tell
+ * "none selected" from "field not submitted" -- absent means unchanged, empty
+ * means cleared, and they must not look the same.
+ */
+(function () {
+    'use strict';
+    document.addEventListener('change', function (e) {
+        var box = e.target.closest('[data-option]');
+        if (!box) return;
+        var key = box.dataset.option;
+        var checked = Array.prototype.slice.call(
+            document.querySelectorAll('[data-option="' + key + '"]:checked')
+        ).map(function (b) { return b.value; });
+        var hidden = document.getElementById('v-' + key);
+        if (hidden) hidden.value = checked.join(',');
+    });
+})();

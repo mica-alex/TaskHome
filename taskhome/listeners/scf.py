@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 from dateutil import parser
 
+from . import base
 from .. import constants, printing, state, storage
 from ..logsetup import log
 
@@ -49,7 +50,123 @@ def parse_utc(value, default=None):
     return parsed.astimezone(timezone.utc)
 
 
-def fetch_scf_issues(request_types, after):
+#: Statuses the API accepts. Closed/archived are offered but off by default:
+#: an issue that opens and closes between two polls is never seen either way,
+#: and subscribing to closures doubles the paper for the same event.
+SCF_STATUSES = ('open', 'acknowledged', 'closed', 'archived')
+
+FILTER_SCHEMA = (
+    base.field('status', 'Issue statuses', 'multiselect',
+               default=['open', 'acknowledged'], group='Filters',
+               options=SCF_STATUSES,
+               help='An issue opened and closed between two polls is missed '
+                    'whatever this is set to.'),
+    base.field('place_url', 'Place', 'text', default='', group='Filters',
+               help="A SeeClickFix place slug, e.g. 'manchester'. Narrows every "
+                    "query to that area."),
+    base.field('bbox', 'Bounding box', 'text', default='', group='Filters',
+               help='min_lat, min_lng, max_lat, max_lng. An alternative to Place '
+                    'for an area that does not match one.'),
+    base.field('search', 'Keyword', 'text', default='', group='Filters',
+               help='Free-text match. Requires a Place or a bounding box -- see '
+                    'below.'),
+    base.field('print_photos', 'Print the photo', 'bool', default=False,
+               group='Receipt',
+               help='Reproduces the reported photo on the receipt. Off by '
+                    'default: it roughly doubles the paper per issue and adds '
+                    'a download to the print path.'),
+    base.field('photo_width', 'Photo width (dots)', 'int', default=384,
+               min=128, max=576, group='Receipt', depends_on='print_photos',
+               help='576 is the full paper width. 384 stays recognisable for '
+                    'about two thirds of the paper.'),
+    base.field('muted_types', 'Muted categories', 'multiselect', default=[],
+               group='Filters',
+               help='Temporarily stop printing these without unsubscribing, so '
+                    'the id is still there when you want it back.'),
+)
+
+
+def get_filters(scf=None):
+    """Filter settings merged over defaults."""
+    scf = state.listeners.get('scf') or {} if scf is None else scf
+    filters = {spec['key']: spec['default'] for spec in FILTER_SCHEMA}
+    for key in filters:
+        if key in scf:
+            filters[key] = scf[key]
+    return filters
+
+
+def parse_bbox(raw):
+    """'42.95, -71.5, 43.03, -71.4' -> the four API params, or None."""
+    parts = [p.strip() for p in str(raw or '').split(',') if p.strip()]
+    if not parts:
+        return None
+    if len(parts) != 4:
+        raise ValueError('A bounding box needs four numbers: '
+                         'min_lat, min_lng, max_lat, max_lng.')
+    try:
+        min_lat, min_lng, max_lat, max_lng = (float(p) for p in parts)
+    except ValueError:
+        raise ValueError('A bounding box must be four numbers.')
+    if min_lat >= max_lat or min_lng >= max_lng:
+        raise ValueError('Bounding box minimums must be smaller than maximums.')
+    return {'min_lat': min_lat, 'min_lng': min_lng,
+            'max_lat': max_lat, 'max_lng': max_lng}
+
+
+def validate_filters(filters):
+    """Raise ValueError with a message worth showing, or return the filters.
+
+    The keyword rule is not a style preference. Verified against the live API:
+    `search=pothole` alone does not return within 60 seconds -- it scans every
+    one of ~850,000 issues -- while the same search with `place_url=manchester`
+    answers in about 6. Allowing a bare keyword would let someone configure a
+    listener that hangs every poll until the timeout, then backs off, forever.
+    """
+    statuses = filters.get('status') or []
+    unknown = [s for s in statuses if s not in SCF_STATUSES]
+    if unknown:
+        raise ValueError(f"Not a valid status: {', '.join(unknown)}.")
+    if not statuses:
+        raise ValueError('Pick at least one status, or nothing can match.')
+
+    bbox = parse_bbox(filters.get('bbox'))
+    if filters.get('search') and not (filters.get('place_url') or bbox):
+        raise ValueError(
+            'A keyword needs a Place or a bounding box to search within. '
+            'Searching the whole of SeeClickFix does not return in time.')
+    return filters
+
+
+def filter_params(filters):
+    """The filter settings as API query parameters."""
+    params = {}
+    statuses = filters.get('status') or ['open', 'acknowledged']
+    params['status'] = ','.join(statuses)
+    if filters.get('place_url'):
+        params['place_url'] = filters['place_url']
+    bbox = parse_bbox(filters.get('bbox'))
+    if bbox:
+        params.update(bbox)
+    if filters.get('search'):
+        params['search'] = filters['search']
+    return params
+
+
+def is_muted(issue, filters):
+    """Whether this issue's category is muted.
+
+    Applied after the fetch rather than by removing the id, so unmuting
+    restores the subscription without having to find the number again.
+    """
+    muted = {str(m) for m in (filters.get('muted_types') or [])}
+    if not muted:
+        return False
+    request_type = issue.get('request_type') or {}
+    return str(request_type.get('id')) in muted
+
+
+def fetch_scf_issues(request_types, after, filters=None):
     """Fetch every page of SCF issues created after `after`.
 
     The old code requested one page of 100 and ignored
@@ -61,11 +178,11 @@ def fetch_scf_issues(request_types, after):
     page = 1
     while page <= SCF_MAX_PAGES:
         params = {
-            'status': 'open,acknowledged',
             'request_types': request_types,
             'after': after,
             'per_page': str(SCF_PER_PAGE),
             'page': str(page),
+            **filter_params(filters or get_filters()),
         }
         log.info(f"Fetching SCF issues after {after}, page {page}")
         resp = requests.get(SCF_ISSUES_URL, params=params, timeout=15)
@@ -163,7 +280,8 @@ def poll_scf_listener(now_utc):
     after = after_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     try:
-        issues = fetch_scf_issues(request_types, after)
+        filters = get_filters(scf)
+        issues = fetch_scf_issues(request_types, after, filters)
     except Exception as e:
         failures = scf.get('consecutive_failures', 0) + 1
         # Exponential backoff, capped. last_check is deliberately NOT advanced,
@@ -181,12 +299,22 @@ def poll_scf_listener(now_utc):
     seen_set = set(seen)
 
     fresh = []
+    muted_count = 0
     for issue in issues:
         issue_id = issue.get('id')
         if issue_id is None or issue_id in seen_set:
             continue
         seen_set.add(issue_id)
+        if is_muted(issue, filters):
+            # Marked seen, not skipped: leaving it out would re-fetch and
+            # re-evaluate the same issue on every poll for as long as it stays
+            # inside the window.
+            seen.append(issue_id)
+            muted_count += 1
+            continue
         fresh.append(issue)
+    if muted_count:
+        log.info(f"SCF: {muted_count} issue(s) in muted categories")
 
     fresh.sort(key=lambda i: i.get('created_at') or '')
 

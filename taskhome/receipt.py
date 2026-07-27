@@ -96,6 +96,30 @@ def barcode(value, height=60):
     return {'type': 'barcode', 'value': value, 'height': height}
 
 
+#: Printable width in dots. Font A is 48 columns of 12 dots.
+PAPER_DOTS = FONTS['a']['cols'] * FONTS['a']['cell_w']
+
+#: Default cap for a printed photo. Full paper width is 576 dots, which for a
+#: portrait phone photo is about 100mm of paper for one picture -- more than
+#: the rest of the receipt put together. 384 keeps it recognisable at roughly
+#: two thirds the cost.
+DEFAULT_IMAGE_DOTS = 384
+
+
+def image(src, width=DEFAULT_IMAGE_DOTS, max_height=DEFAULT_IMAGE_DOTS, alt='Photo'):
+    """A raster image block.
+
+    `src` is a URL, resolved at print time rather than stored: a receipt
+    template holds a placeholder like {media_url}, and the bytes are fetched
+    when the receipt is actually printed.
+
+    `alt` is what the text preview and a failed fetch show, so a receipt is
+    never silently missing something it promised.
+    """
+    return {'type': 'image', 'src': src, 'width': width,
+            'max_height': max_height, 'alt': alt}
+
+
 def rule(char='-', font='b'):
     return {'type': 'rule', 'char': char, 'font': font}
 
@@ -190,6 +214,12 @@ def block_height(block):
         return (qr_modules(block['value']) + 2) * block.get('size', 4) + QR_LEADING_DOTS
     if kind == 'barcode':
         return block.get('height', 60) + FONTS['b']['cell_h']  # symbol + label
+    if kind == 'image':
+        # Without the real aspect ratio the best estimate is the cap, which is
+        # what a portrait photo hits anyway. A landscape one prints shorter,
+        # so the preview's millimetre figure is an upper bound rather than a
+        # lie in the dangerous direction.
+        return block.get('max_height', DEFAULT_IMAGE_DOTS) + LEADING_DOTS
     if kind == 'rule':
         return line_dots(block)
     if kind == 'text':
@@ -257,6 +287,27 @@ def render_escpos(blocks, printer):
                 printer.line_spacing(spacing_units(QR_LEADING_DOTS))
                 printer.set(align='center')
                 printer.qr(block['value'], size=block.get('size', 4), model=2)
+            elif kind == 'image':
+                # Fetched here, at print time, rather than stored in the block:
+                # a template holds a placeholder and the bytes belong to this
+                # one receipt. A failure prints the alt text instead of
+                # abandoning the whole receipt (P0-8's build-before-print
+                # principle does not apply -- the network cannot be checked in
+                # advance).
+                from . import images
+                images.throttle()
+                prepared = images.load(block.get('src'), block.get('width', 384),
+                                       block.get('max_height'))
+                if prepared is None:
+                    printer.line_spacing(spacing_units(line_dots({'font': 'b'})))
+                    printer.set(align='center', font='b', bold=False,
+                                custom_size=True, width=1, height=1)
+                    printer.text(f"[{block.get('alt', 'Photo')} unavailable]\n")
+                else:
+                    printer.set(align='center')
+                    printer.image(prepared, center=True)
+                    printer.line_spacing(spacing_units(LEADING_DOTS))
+                    printer.text('\n')
             elif kind == 'barcode':
                 printer.barcode(str(block['value']), 'CODE39',
                                 width=2, height=block.get('height', 60),
@@ -339,6 +390,16 @@ def render_text(blocks, page_width=PAGE_COLUMNS, proportional=False):
                 label = 'QR' if i == (box_h - 2) // 2 else ''
                 out.append(('│' + label.center(box_w - 2) + '│').center(page_width))
             out.append(('└' + '─' * (box_w - 2) + '┘').center(page_width))
+        elif kind == 'image':
+            # A box of the right proportions, so the preview's height figure
+            # reflects what the paper will actually cost.
+            width_cols = min(page_width - 4, 28)
+            rows = max(2, round(block.get('max_height', 384) / line_dots({'font': 'b'})))
+            out.append(('┌' + '─' * width_cols + '┐').center(page_width))
+            for i in range(rows):
+                label = block.get('alt', 'Photo') if i == rows // 2 else ''
+                out.append(('│' + label.center(width_cols) + '│').center(page_width))
+            out.append(('└' + '─' * width_cols + '┘').center(page_width))
         elif kind == 'barcode':
             out.append(('║' * min(page_width - 4, 30)).center(page_width))
             out.append(str(block['value']).center(page_width))
@@ -409,6 +470,16 @@ def render_html(blocks, page_columns=PAGE_COLUMNS):
                          'modules': qr_modules(block['value']),
                          'size': block.get('size', 4),
                          'value': block['value']})
+        elif kind == 'image':
+            rows.append({
+                'kind': 'image',
+                'src': block.get('src', ''),
+                'alt': block.get('alt', 'Photo'),
+                # Proportional to the paper, so the Studio shows the real cost
+                # of a photo rather than a thumbnail that looks free.
+                'width_pct': round(100 * block.get('width', 384) / PAPER_DOTS, 1),
+                'height_dots': block.get('max_height', 384),
+            })
         elif kind == 'barcode':
             rows.append({'kind': 'barcode', 'value': str(block['value']),
                          'height': block.get('height', 60)})

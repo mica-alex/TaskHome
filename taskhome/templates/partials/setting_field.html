@@ -40,6 +40,30 @@
         {% endfor %}
       </select>
 
+    {% elif kind == 'multiselect' and spec.options %}
+      {#
+        A closed set of choices is a checkbox list, not a free-text token
+        field -- there is no reason to let someone type 'aknowledged'.
+
+        The hidden field carries the value so that "none checked" is
+        distinguishable from "field absent"; without it, unchecking every box
+        would look identical to an older client that never sent the field, and
+        the server could not tell "clear this" from "leave it alone".
+      #}
+      <label>{{ spec.label }}</label>
+      <div class="option-list" data-options-for="{{ spec.key }}">
+        {% for option in spec.options %}
+          <label class="mica-checkbox">
+            <input type="checkbox" value="{{ option }}"
+                   data-option="{{ spec.key }}"
+                   {% if option in (value or []) %}checked{% endif %}>
+            <span>{{ option }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="{{ spec.key }}" id="v-{{ spec.key }}"
+             value="{{ (value or []) | join(',') }}">
+
     {% elif kind == 'multiselect' %}
       {#
         Rendered as chips over a hidden comma field rather than a bare text

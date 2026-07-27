@@ -122,7 +122,7 @@ def legacy_task_receipt(task, qr_url, when=None):
 # --- SeeClickFix issues -------------------------------------------------------
 
 def scf_receipt(issue, category, address, reported_at, status, has_media,
-                description, when=None, has_video=False):
+                description, when=None, has_video=False, media_url=''):
     """Compact SCF issue.
 
     * The CODE39 barcode is gone. It cost roughly 10 mm — symbol plus its text
@@ -134,6 +134,11 @@ def scf_receipt(issue, category, address, reported_at, status, has_media,
     * Category at 2x for the same reason as the task title.
     """
     blocks = [r.qr(issue.get('html_url') or '', size=4)]
+    if media_url:
+        # Below the QR and above the category, so the picture is the first
+        # thing seen after the code and the text still reads as a caption
+        # under it (P4-7).
+        blocks.append(r.image(media_url, alt='Reported photo'))
     blocks.append(r.text(category, font='a', width=2, height=2, bold=True))
     blocks.append(r.gap(6))
     blocks.append(r.text(address, font='b', width=1, height=1))

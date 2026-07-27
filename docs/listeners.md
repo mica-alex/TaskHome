@@ -107,6 +107,64 @@ or `last_error`. Schema-driven listeners do — `listener_settings.html` has a
 Status card showing last check, seen count, last error and backoff window, and
 the index cards show last-check and error. A full feed view is `P4-6`.
 
+### Filters (P4-5)
+
+Rendered from `scf.FILTER_SCHEMA` through the same macro every other listener
+uses; only the category picker is bespoke.
+
+| Setting | Effect |
+| --- | --- |
+| `status` | Which statuses to fetch. Default open + acknowledged. An issue opened and closed between two polls is missed whatever this says. |
+| `place_url` | A SeeClickFix place slug, e.g. `manchester`. |
+| `bbox` | `min_lat, min_lng, max_lat, max_lng` — for an area no place slug matches. |
+| `search` | Free-text. **Requires a place or a bbox.** |
+| `muted_types` | Stop printing a category without unsubscribing. |
+
+**The keyword rule is a hard constraint, not a preference.** Verified against
+the live API: `search=pothole` alone does not return within 60 seconds — it
+scans roughly 850,000 issues — while `search=pothole&place_url=manchester`
+answers in about 6. Allowing a bare keyword would let someone configure a
+listener that times out on every poll, backs off, and never prints again.
+
+Muting is applied **after** the fetch rather than by removing the request-type
+id, so unmuting restores the subscription without having to find the number
+again. A muted issue is still marked seen — otherwise it is re-fetched and
+re-evaluated on every poll for as long as it stays inside the window.
+
+A filter absent from a submission keeps its stored value; only an explicit
+empty selection clears it. For a multiselect those are the same on the wire,
+which is why the macro emits a hidden marker field.
+
+### Photos on receipts (P4-7)
+
+Off by default: a photo roughly doubles the paper per issue (59 mm → 108 mm
+for the default template) and adds a download to the print path.
+
+When on, `media.image_full` is fetched at print time and reduced for the
+printer in `taskhome/images.py`:
+
+- **Floyd–Steinberg error diffusion**, not thresholding. A thermal printer has
+  one ink level, so a photograph has to become pure black and white; plain
+  thresholding produces a black smear, while error diffusion trades spatial
+  resolution for apparent grey and keeps a scene recognisable at 203 dpi.
+- **EXIF orientation is applied.** A phone photo is usually stored rotated with
+  a tag saying which way is up; ignoring it prints the picture sideways.
+- Scaled to fit, never cropped — a cropped photo of a pothole may not contain
+  the pothole.
+- Capped at 2 MB and 5 seconds, streamed and counted rather than trusting
+  `Content-Length`. Fetches are throttled, because a catch-up burst of twenty
+  issues would otherwise fire twenty downloads at someone else's CDN.
+- Cached under `data/cache/media/`, since the print queue may retry a receipt
+  several times. Derived data; safe to delete.
+- **Every failure returns None**, and the receipt prints `[Photo unavailable]`.
+  A receipt missing its photo is a good outcome; a receipt that failed to print
+  because a CDN was down is not.
+
+`image` is a template block type, so the placement is editable in the Studio:
+`{"type": "image", "src": "{media_url}", "width": 384}`. `{media_url}` is empty
+both when the issue has no photo and when photos are switched off, and `fill()`
+drops the block entirely — so neither case leaves a gap.
+
 ## SeeClickFix API reference (verified 2026-07)
 
 Docs are published at dev.seeclickfix.com (source:
