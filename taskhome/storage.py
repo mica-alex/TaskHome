@@ -8,7 +8,7 @@ import json
 import os
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import constants, state
 from .logsetup import log
@@ -209,6 +209,9 @@ def _save_json_file(name, path, data):
             f"Refusing to save {name}: its file failed to load, so writing "
             f"would destroy recoverable data. Fix {path} and restart.")
         return False
+    # Snapshot what is about to be replaced, before replacing it.
+    backup_store(name, path)
+
     directory = os.path.dirname(os.path.abspath(path)) or '.'
     tmp_path = None
     try:
@@ -247,3 +250,102 @@ def save_history():
 
 def save_listeners():
     return _save_json_file('listeners', constants.LISTENERS_FILE, state.listeners)
+
+
+# --- backups (P6-2) -----------------------------------------------------------
+
+def backup_dir(name):
+    return os.path.join(constants.DATA_DIR, constants.BACKUP_DIRNAME, name)
+
+
+def backup_keep():
+    """How many snapshots to retain per store."""
+    raw = (state.config.get('backups') or {}).get('keep', constants.DEFAULT_BACKUP_KEEP)
+    try:
+        keep = int(raw)
+    except (TypeError, ValueError):
+        return constants.DEFAULT_BACKUP_KEEP
+    return max(keep, 1)
+
+
+def backups_enabled():
+    backups = state.config.get('backups')
+    if isinstance(backups, dict) and 'enabled' in backups:
+        return bool(backups['enabled'])
+    return True
+
+
+def list_backups(name):
+    """Snapshots for a store, newest first."""
+    directory = backup_dir(name)
+    try:
+        entries = [e for e in os.listdir(directory) if e.endswith('.json')]
+    except OSError:
+        return []
+    return sorted(entries, reverse=True)
+
+
+def backup_store(name, path):
+    """Snapshot the file at `path` before it is overwritten.
+
+    Deliberately a *pre-image*: the copy is of what is currently on disk, so
+    the previous good state survives a bad write. Backing up after writing
+    would only ever preserve the new content, which is useless for recovery.
+
+    Skipped when the content is unchanged since the last snapshot -- the
+    scheduler rewrites tasks.json whenever anything moves, and keeping twenty
+    identical copies would push the real history out of the retention window.
+
+    Never raises: a backup failure must not prevent the save it precedes.
+    """
+    if not backups_enabled() or not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'rb') as f:
+            current = f.read()
+        if not current:
+            return None
+
+        directory = backup_dir(name)
+        existing = list_backups(name)
+        if existing:
+            try:
+                with open(os.path.join(directory, existing[0]), 'rb') as f:
+                    if f.read() == current:
+                        return None      # unchanged since the last snapshot
+            except OSError:
+                pass
+
+        os.makedirs(directory, exist_ok=True)
+        # Microsecond precision, because names are sorted lexicographically to
+        # order them. At second resolution two saves in the same second
+        # collided, and the disambiguating suffix ('...Z-1.json') sorted
+        # *before* the plain name -- so "newest" was actually the oldest, which
+        # broke both the unchanged-content check and pruning.
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+        target = os.path.join(directory, f'{stamp}.json')
+        suffix = 1
+        while os.path.exists(target):
+            target = os.path.join(directory, f'{stamp}_{suffix:03d}.json')
+            suffix += 1
+        with open(target, 'wb') as f:
+            f.write(current)
+            f.flush()
+            os.fsync(f.fileno())
+
+        prune_backups(name)
+        return target
+    except OSError as e:
+        log.warning(f"Could not back up {name}: {e}")
+        return None
+
+
+def prune_backups(name):
+    """Keep only the newest `backup_keep()` snapshots."""
+    directory = backup_dir(name)
+    stale = list_backups(name)[backup_keep():]
+    for entry in stale:
+        try:
+            os.unlink(os.path.join(directory, entry))
+        except OSError as e:
+            log.debug(f"Could not prune backup {entry}: {e}")

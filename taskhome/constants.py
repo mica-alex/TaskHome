@@ -24,6 +24,11 @@ DATA_DIR = os.environ.get('TASKHOME_DATA_DIR') or DEFAULT_DATA_DIR
 # The legacy migration keys off this: see storage.migrate_legacy_data_files.
 DATA_DIR_IS_DEFAULT = not os.environ.get('TASKHOME_DATA_DIR')
 
+# Backups (P6-2). Snapshots are taken of the file about to be overwritten --
+# the pre-image -- so a bad write leaves the previous good state recoverable.
+BACKUP_DIRNAME = 'backups'
+DEFAULT_BACKUP_KEEP = 20
+
 STORE_FILENAMES = {
     'config': 'config.json',
     'tasks': 'tasks.json',

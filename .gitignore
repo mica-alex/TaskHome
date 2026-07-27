@@ -10,6 +10,7 @@
 /DATA_MOVED.txt
 /app.log
 /logs/
+# data/ already covers data/backups/, listed for clarity.
 
 # Agent working notes and plans.
 /docs/agent-plans/
