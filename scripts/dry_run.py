@@ -13,49 +13,51 @@ Read-only: no receipts, no saves, no migration. Safe to run any time.
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-os.environ.setdefault('TASKHOME_NO_INIT', '1')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app as taskhome  # noqa: E402
+# Import the package, never `app` -- importing the entry point builds the Flask
+# app AND starts the scheduler thread, which for a read-only tool means running
+# a scheduler against live data. That regression is why this comment exists.
+import taskhome  # noqa: E402
 
 # Keep this tool's report readable regardless of the configured level: the
 # user may have set DEBUG, and this is a report, not a log.
-taskhome.app.logger.setLevel('WARNING')
+taskhome.log.setLevel('WARNING')
 
 
 def load_readonly():
     """Load state without migrating or writing anything."""
-    for name, filename in taskhome.STORE_FILENAMES.items():
+    for name, filename in taskhome.constants.STORE_FILENAMES.items():
         # Prefer data/, fall back to the legacy root location.
-        candidate = taskhome.data_path(filename)
+        candidate = taskhome.constants.data_path(filename)
         if not os.path.exists(candidate):
-            legacy = os.path.join(taskhome.APP_ROOT, filename)
+            legacy = os.path.join(taskhome.constants.APP_ROOT, filename)
             if os.path.exists(legacy):
                 candidate = legacy
-        value, ok = taskhome._load_json_file(name, candidate, None)
+        value, ok = taskhome.storage._load_json_file(name, candidate, None)
         if ok and value is not None:
             if name == 'config':
-                merged = dict(taskhome.DEFAULT_CONFIG)
+                merged = dict(taskhome.constants.DEFAULT_CONFIG)
                 merged.update(value if isinstance(value, dict) else {})
-                taskhome.config = merged
+                taskhome.state.config = merged
             elif name == 'tasks':
-                taskhome.tasks = value
+                taskhome.state.tasks = value
             elif name == 'history':
-                taskhome.history = value
+                taskhome.state.history = value
             elif name == 'listeners':
-                taskhome.listeners = value
+                taskhome.state.listeners = value
 
 
 def report_tasks(now):
-    cfg = taskhome.get_catchup_config()
+    cfg = taskhome.recurrence.get_catchup_config()
     print(f"\nCatch-up policy: recurring={cfg['policy']!r} "
           f"one-off={cfg['oneoff_policy']!r} cap={cfg['max_prints']}")
     print(f"Now: {now:%Y-%m-%d %H:%M:%S} (local)\n")
 
     total = 0
-    for task in taskhome.tasks:
+    for task in taskhome.state.tasks:
         title = task.get('title', '?')
         if not task.get('enabled', True):
             why = ('schedule error' if task.get('schedule_error')
@@ -63,8 +65,8 @@ def report_tasks(now):
             print(f"  - {title:<20} skipped ({why})")
             continue
         try:
-            next_time, missed = taskhome.advance_schedule(dict(task), now)
-        except taskhome.ScheduleError as e:
+            next_time, missed = taskhome.recurrence.advance_schedule(dict(task), now)
+        except taskhome.recurrence.ScheduleError as e:
             print(f"  ! {title:<20} WOULD BE DISABLED: {e}")
             continue
         except ValueError as e:
@@ -75,8 +77,8 @@ def report_tasks(now):
             print(f"  . {title:<20} not due (next {next_time})")
             continue
 
-        policy = taskhome.resolve_catchup_policy(task, cfg)
-        chosen, dropped = taskhome.select_catchup_prints(missed, policy, cfg, now)
+        policy = taskhome.recurrence.resolve_catchup_policy(task, cfg)
+        chosen, dropped = taskhome.recurrence.select_catchup_prints(missed, policy, cfg, now)
         count = len(chosen) + (1 if dropped else 0)
         total += count
         detail = f"{len(missed)} missed, policy={policy}"
@@ -90,7 +92,7 @@ def report_tasks(now):
 
 
 def report_scf(now_utc, check_network):
-    scf = taskhome.listeners.get('scf')
+    scf = taskhome.state.listeners.get('scf')
     if not scf:
         print("\nSeeClickFix: not configured")
         return 0
@@ -98,8 +100,8 @@ def report_scf(now_utc, check_network):
         print("\nSeeClickFix: disabled")
         return 0
 
-    cap = scf.get('max_prints_per_poll', taskhome.SCF_MAX_PRINTS_PER_POLL)
-    last_check = taskhome.parse_utc(scf.get('last_check'))
+    cap = scf.get('max_prints_per_poll', taskhome.listeners.scf.SCF_MAX_PRINTS_PER_POLL)
+    last_check = taskhome.listeners.scf.parse_utc(scf.get('last_check'))
     seen = scf.get('seen') or []
 
     print(f"\nSeeClickFix: enabled, types={scf.get('request_types')}")
@@ -109,7 +111,7 @@ def report_scf(now_utc, check_network):
 
     if last_check is None:
         window = "one hour (no last_check recorded)"
-        after = now_utc - taskhome.timedelta(hours=1)
+        after = now_utc - timedelta(hours=1)
     else:
         delta = now_utc - last_check
         hours = delta.total_seconds() / 3600
@@ -122,7 +124,7 @@ def report_scf(now_utc, check_network):
         return None
 
     try:
-        issues = taskhome.fetch_scf_issues(
+        issues = taskhome.listeners.scf.fetch_scf_issues(
             scf.get('request_types', ''), after.strftime('%Y-%m-%dT%H:%M:%SZ'))
     except Exception as e:
         print(f"  fetch failed: {e}")

@@ -26,10 +26,12 @@ import argparse
 import os
 import sys
 
-os.environ.setdefault('TASKHOME_NO_INIT', '1')  # don't start the scheduler
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app as taskhome  # noqa: E402
+# Import the package, never `app` -- importing the entry point builds the Flask
+# app AND starts the scheduler thread, which for a read-only tool means running
+# a scheduler against live data. That regression is why this comment exists.
+import taskhome  # noqa: E402
 
 
 def ruler(width=64):
@@ -59,11 +61,11 @@ def spacing_strip():
     documented figure does not match what the head actually lays down. Rather
     than keep guessing, print the options and measure by eye.
     """
-    import receipt
+    from taskhome import receipt
 
     print('Printing line-spacing test strip...')
     try:
-        with taskhome.open_printer() as p:
+        with taskhome.printing.open_printer() as p:
             p.line_spacing()
             p.set(align='center', font='a', bold=True, custom_size=True,
                   width=1, height=1)
@@ -112,9 +114,9 @@ def main():
     if not args.confirm:
         ap.error('refusing to print without --confirm (this emits real paper)')
 
-    if not taskhome.is_printer_connected():
+    if not taskhome.printing.is_printer_connected():
         print('Printer not detected at '
-              f'{taskhome.VID:04x}:{taskhome.PID:04x}. Nothing printed.')
+              f'{taskhome.constants.VID:04x}:{taskhome.constants.PID:04x}. Nothing printed.')
         return 1
 
     if args.spacing:
@@ -124,13 +126,13 @@ def main():
     print('Printing calibration receipt...')
 
     try:
-        with taskhome.open_printer() as p:
+        with taskhome.printing.open_printer() as p:
             p.set(align='center', font='a', bold=True, custom_size=True,
                   width=1, height=1)
             p.text('TASKHOME CALIBRATION\n')
             p.set(align='left', font='b', bold=False, custom_size=True,
                   width=1, height=1)
-            p.text(f'profile TM-T20II / {taskhome.PRINTER_MODEL}\n')
+            p.text(f'profile TM-T20II / {taskhome.constants.PRINTER_MODEL}\n')
             p.text('-' * 40 + '\n')
 
             # The measurement itself. Left-aligned so the wrap point is

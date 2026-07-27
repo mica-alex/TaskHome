@@ -18,7 +18,6 @@ import json
 import os
 import sys
 
-os.environ.setdefault('TASKHOME_NO_INIT', '1')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from taskhome import constants, storage  # noqa: E402

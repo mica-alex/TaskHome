@@ -17,14 +17,16 @@ import os
 import sys
 from datetime import datetime
 
-os.environ.setdefault('TASKHOME_NO_INIT', '1')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app as taskhome  # noqa: E402
-import layouts  # noqa: E402
-import receipt  # noqa: E402
+# Import the package, never `app` -- importing the entry point builds the Flask
+# app AND starts the scheduler thread, which for a read-only tool means running
+# a scheduler against live data. That regression is why this comment exists.
+import taskhome  # noqa: E402
+from taskhome import layouts  # noqa: E402
+from taskhome import receipt  # noqa: E402
 
-taskhome.app.logger.setLevel('WARNING')
+taskhome.log.setLevel('WARNING')
 
 SAMPLE_TASK = {
     'id': 'a1b2c3d4-0000-4000-8000-000000000000',
@@ -79,7 +81,7 @@ def main():
             print("\n(preview only - pass --confirm to print)")
         return 0
 
-    if not taskhome.is_printer_connected():
+    if not taskhome.printing.is_printer_connected():
         print('Printer not detected. Nothing printed.')
         return 1
 
@@ -87,7 +89,7 @@ def main():
         height = receipt.height_mm(blocks)
         print(f'Printing {name} ({height:.0f} mm estimated)...')
         try:
-            with taskhome.open_printer() as p:
+            with taskhome.printing.open_printer() as p:
                 receipt.render_escpos(blocks, p)
                 p.cut()
         except Exception as e:

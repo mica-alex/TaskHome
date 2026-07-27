@@ -61,3 +61,49 @@ def test_importing_the_package_has_no_side_effects():
                             cwd='/', capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert 'clean' in result.stdout
+
+
+@pytest.mark.parametrize('script', sorted(
+    p.name for p in (REPO / 'scripts').glob('*.py')))
+def test_scripts_have_no_import_side_effects(script):
+    """Importing a tool must not start a scheduler or load real data.
+
+    This regressed once: the package split made `import app` build the Flask
+    app *and* start the scheduler thread, so dry_run.py -- a read-only
+    reporting tool -- silently ran a scheduler against live data. Scripts must
+    import the package, never the entry point.
+    """
+    source = (REPO / 'scripts' / script).read_text()
+    assert 'import app' not in source, (
+        f'{script} imports the entry point, which starts the scheduler. '
+        f'Import the taskhome package instead.')
+
+    check = (
+        'import threading, runpy, sys;'
+        'sys.path.insert(0, %r);'
+        'before = threading.active_count();'
+        'import importlib.util as u;'
+        'spec = u.spec_from_file_location("tool", %r);'
+        'mod = u.module_from_spec(spec);'
+        'sys.argv = ["tool"];'
+        'spec.loader.exec_module(mod);'
+        'assert threading.active_count() == before, "a thread was started";'
+        'print("clean")'
+        % (str(REPO), str(REPO / 'scripts' / script))
+    )
+    result = subprocess.run([sys.executable, '-c', check],
+                            cwd='/', capture_output=True, text=True)
+    assert 'clean' in result.stdout, (
+        f'{script} had import side effects:\n{result.stderr[-600:]}')
+
+
+def test_the_entry_point_is_the_only_thing_that_starts_a_scheduler():
+    """app.py is deliberately the one place that opts in (P0-12)."""
+    starters = []
+    for path in list((REPO / 'taskhome').rglob('*.py')) + [REPO / 'app.py']:
+        text = path.read_text()
+        if 'start_scheduler()' in text and path.name not in ('scheduler.py',):
+            starters.append(path.name)
+    assert starters == ['__init__.py'], (
+        f'unexpected scheduler starters: {starters} '
+        f'(only create_app should call it)')
