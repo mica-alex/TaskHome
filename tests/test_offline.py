@@ -144,3 +144,30 @@ def test_mica_inputs_survive_without_materialize():
     that or every dropdown vanishes offline (P0-15)."""
     css = (REPO / 'taskhome' / 'static' / 'mica.css').read_text()
     assert 'display: block !important' in css
+
+
+def test_no_styles_target_the_removed_nav_markup():
+    """The old Materialize <nav> appbar is gone (P2A-3).
+
+    Its rules used !important on the bare `nav` element, so they painted a
+    full-width blue bar straight through the replacement. Dead CSS that only
+    *looks* dead is worse than none: it still matches.
+    """
+    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
+    for selector in ('.nav-wrapper', '.brand-logo-container', '.brand-logo-img',
+                     'nav ul.right', 'nav .brand-logo'):
+        assert selector not in css, f'{selector} is styled but no longer rendered'
+
+    for template in template_files():
+        text = template.read_text()
+        for markup in ('nav-wrapper', 'brand-logo-container', 'id="nav-mobile"'):
+            assert markup not in text, f'{template.name} still uses {markup}'
+
+
+def test_legacy_input_overrides_exempt_mica_controls():
+    """styles.css forces input colours with !important to keep Materialize
+    readable in dark mode. Unscoped, that beats .mica-input and the new
+    components silently render in the old palette."""
+    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
+    assert ':not(.mica-input)' in css, (
+        'the legacy input overrides are not exempting Mica controls')

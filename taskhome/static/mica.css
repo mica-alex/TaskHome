@@ -372,3 +372,56 @@ body::before {
 
 .browse-row:hover { background-color: color-mix(in srgb, var(--mica-accent) 8%, transparent); }
 .browse-row input { width: 18px; height: 18px; }
+
+/*
+ * Neutralise Materialize's bare-element styling on the appbar.
+ *
+ * Materialize paints `nav` as a full-width coloured bar with a fixed 56px
+ * line-height and white links. `.mica-nav` is a <nav>, so it inherited all of
+ * that and drew a blue slab through the middle of the pill. Reset explicitly
+ * rather than relying on specificity -- Materialize is vendored and its
+ * selectors are not ours to reason about.
+ */
+nav.mica-nav,
+header.mica-appbar nav {
+  background: none;
+  background-color: transparent;
+  box-shadow: none;
+  height: auto;
+  line-height: normal;
+  width: auto;
+}
+
+nav.mica-nav a {
+  color: var(--mica-text-muted);
+  line-height: normal;
+  height: auto;
+  display: inline-block;
+  font-size: var(--mica-text-body);
+  text-transform: none;
+  padding: 6px 12px;
+}
+
+nav.mica-nav a:hover {
+  background-color: color-mix(in srgb, var(--mica-accent) 12%, transparent);
+  color: var(--mica-text);
+}
+
+nav.mica-nav a[aria-current='page'] {
+  color: var(--mica-accent);
+  background-color: color-mix(in srgb, var(--mica-accent) 14%, transparent);
+  font-weight: var(--mica-weight-semibold);
+}
+
+/* Materialize also styles bare buttons; keep the toggle square and compact. */
+header.mica-appbar .mica-btn {
+  min-height: 36px;
+  padding: 6px 12px;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  box-shadow: none;
+}
+
+/* The brand logo was sized for a 64px Materialize bar. */
+header.mica-appbar .mica-brand img { height: 26px; }

@@ -27,43 +27,15 @@ body {
     color: var(--primary-text);
 }
 
-nav, .nav-extended {
-    background-color: var(--nav-bg) !important;
-}
-
-.nav-wrapper {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 20px;
-}
-
-.brand-logo-container {
-    display: flex;
-    align-items: center;
-}
-
-.brand-logo-img {
-    height: 64px; /* Matches Materialize nav height */
-    margin-right: 10px;
-}
-
-nav .brand-logo {
-    position: relative;
-}
-
-nav .brand-logo, nav a {
-    color: var(--nav-text) !important;
-}
-
-nav ul.right {
-    display: flex;
-    align-items: center;
-}
-
-nav ul.right li {
-    margin-left: 15px;
-}
+/*
+ * The old Materialize <nav> appbar is gone, replaced by .mica-appbar (P2A-3).
+ * Its rules used !important and targeted the bare `nav` element, so they
+ * painted a full-width blue bar straight through the new nav. Removed rather
+ * than narrowed: nothing renders that markup any more.
+ *
+ * Materialize also styles bare `nav`, so the new nav explicitly resets it in
+ * mica.css instead of relying on specificity.
+ */
 
 main.container {
     margin-top: 20px;
@@ -85,17 +57,18 @@ table, th, td {
     border: 1px solid var(--table-border);
 }
 
-input:not([type="submit"]), select {
+input:not([type="submit"]):not(.mica-input), select:not(.mica-input) {
     background-color: var(--input-bg) !important;
     color: var(--input-text) !important;
 }
 
-input:not([type="submit"]):focus, select:focus {
+input:not([type="submit"]):not(.mica-input):focus, select:not(.mica-input):focus {
     border-bottom: 1px solid #0288d1 !important;
     box-shadow: 0 1px 0 0 #0288d1 !important;
 }
 
-label {
+.card label,
+.modal label {
     color: var(--primary-text) !important;
 }
 
