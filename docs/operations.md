@@ -124,13 +124,50 @@ If you add a test that exercises persistence, point the file constants at
 
 ## Logs
 
-- `app.logger` is set to DEBUG with **no file handler configured**
-  — output goes to the console. The `app.log` file in the repo root is
-  vestigial (0 bytes, nothing writes it).
-- DEBUG logging includes **full dumps of tasks and history** on every
-  `load_data()` — noisy and mildly sensitive (MASTER_PLAN `P1-5`).
-- The stray `print("Checking SCF listener...")` that wrote to stdout each poll
-  is now a debug log call.
+Level resolves `TASKHOME_LOG_LEVEL` > `config['log_level']` > **INFO**. Output
+goes to the console *and* to a rotating file at `logs/taskhome.log`
+(2 MB × 5 backups, override the directory with `TASKHOME_LOG_DIR`). If the log
+directory cannot be created the app warns and carries on — an appliance must
+still run when it cannot write a log.
+
+```sh
+TASKHOME_LOG_LEVEL=DEBUG ./scripts/run.sh   # verbose, for a specific problem
+```
+
+Previously the level was hardcoded to DEBUG with no file handler. That was not
+merely untidy: `calculate_next` logged once per step, so catching up a
+year-old task emitted several hundred lines, none of it survived a restart, and
+the volume buried the output of any tool importing the module. The per-step
+line is gone; `advance_schedule` logs one summary instead.
+
+The `app.log` file in the repo root is vestigial from before this and can be
+deleted.
+
+## Dry run: what would print?
+
+Before starting after a long gap — or after changing catch-up settings — ask
+what it is about to do:
+
+```sh
+./scripts/dry_run.py              # tasks only, no network
+./scripts/dry_run.py --check-scf  # also query SeeClickFix for the real count
+```
+
+Read-only: no receipts, no saves, no migration. It reports per task how many
+occurrences were missed, which policy applies, and how many receipts that
+means, plus the SeeClickFix window and how many issues sit in it.
+
+## Printer calibration
+
+```sh
+./scripts/calibrate_printer.py --confirm            # ~15cm of paper
+./scripts/calibrate_printer.py --confirm --minimal  # ~5cm, rulers only
+./scripts/calibrate_printer.py --confirm --width 96 # wider ruler for font B
+```
+
+**Emits physical paper** and refuses to run without `--confirm`. Prints a
+column ruler per font; the wrap point is the printer's width. Measured values
+for the unit in use are recorded in [printing.md](printing.md).
 
 ## Data files & recovery
 

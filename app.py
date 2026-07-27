@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -7,6 +8,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from dateutil import parser
 
 import usb.core
@@ -16,7 +18,6 @@ from flask import Flask, render_template, request, redirect, url_for
 import requests  # New import for API calls
 
 app = Flask(__name__)
-app.logger.setLevel('DEBUG')  # Set to DEBUG for detailed logs
 
 # Constants
 DEFAULT_HOST = '0.0.0.0'
@@ -86,6 +87,54 @@ STATE_LOCK = threading.RLock()
 # damaged but still recoverable by hand, turning a fixable problem into
 # permanent data loss (P0-5). Saves for these names are refused.
 _load_failed = set()
+
+
+def configure_logging(level=None, log_dir=None):
+    """Set up logging (P1-5): sane default level, rotating file, no duplicates.
+
+    Previously the level was hardcoded to DEBUG with no file handler, which
+    meant every recurrence step printed a line -- hundreds when catching up a
+    year-old task -- and none of it survived a restart. The volume was not
+    merely untidy: it buried the output of tooling that imports this module.
+
+    Level resolves TASKHOME_LOG_LEVEL > config['log_level'] > INFO.
+    """
+    level = (level
+             or os.environ.get('TASKHOME_LOG_LEVEL')
+             or config.get('log_level')
+             or 'INFO')
+    level = str(level).upper()
+    if level not in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'):
+        level = 'INFO'
+
+    log_dir = log_dir or os.environ.get('TASKHOME_LOG_DIR') or os.path.join(APP_ROOT, 'logs')
+    formatter = logging.Formatter(
+        '%(asctime)s %(levelname)-7s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+    logger = app.logger
+    logger.setLevel(level)
+    # Re-running must not stack handlers (the module can be imported twice).
+    for handler in list(logger.handlers):
+        if getattr(handler, '_taskhome', False):
+            logger.removeHandler(handler)
+
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+    console._taskhome = True
+    logger.addHandler(console)
+
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            os.path.join(log_dir, 'taskhome.log'),
+            maxBytes=2 * 1024 * 1024, backupCount=5, encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        file_handler._taskhome = True
+        logger.addHandler(file_handler)
+    except OSError as e:
+        # A missing log file must never stop the appliance from running.
+        logger.warning(f"File logging disabled ({log_dir}): {e}")
+    return level
 
 
 def migrate_legacy_data_files(legacy_dir=None, data_dir=None):
@@ -349,7 +398,9 @@ def calculate_next(next_time_str, recurring, days=None):
     advance_schedule, which enforces that. Weekday searches are bounded to a
     single week: a rule that hasn't matched in 7 days never will (P0-2).
     """
-    app.logger.debug(f"Calculating next time from {next_time_str} with recurring={recurring} and days={days}")
+    # Deliberately not logged per call: advance_schedule can invoke this
+    # hundreds of times catching up a long-overdue task, and the noise
+    # buried everything else (P1-5). advance_schedule logs the summary.
     next_time = datetime.fromisoformat(next_time_str)
     if recurring == 'daily':
         return (next_time + timedelta(days=1)).isoformat()
@@ -481,6 +532,10 @@ def advance_schedule(task, now, max_iterations=4096):
         missed.append(current_str)
         current_str, current = candidate_str, candidate
         if current > now:
+            if len(missed) > 1:
+                app.logger.debug(
+                    f"Advanced {recurring} schedule over {len(missed)} occurrence(s): "
+                    f"{missed[0]} -> {current_str}")
             return current_str, missed
     raise ScheduleError(
         f"recurrence {recurring!r} exceeded {max_iterations} steps from {task['next_time']}")
@@ -1432,8 +1487,10 @@ def start_scheduler():
 
 
 def init_app(load=True, scheduler=True):
+    configure_logging()
     if load:
         load_data()
+        configure_logging()  # re-apply now that config['log_level'] is known
     if scheduler:
         start_scheduler()
     app.logger.debug("Initialization complete: Data loaded and scheduler started")

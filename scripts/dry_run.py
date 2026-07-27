@@ -20,9 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app as taskhome  # noqa: E402
 
-# The app logs at DEBUG, which emits a line per recurrence step -- hundreds of
-# them when catching up a year-old task, burying this tool's actual report.
-# (Log levels are MASTER_PLAN P1-5.)
+# Keep this tool's report readable regardless of the configured level: the
+# user may have set DEBUG, and this is a report, not a log.
 taskhome.app.logger.setLevel('WARNING')
 
 
