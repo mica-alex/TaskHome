@@ -45,11 +45,16 @@ SPACING_DIVISOR = 180          # ESC 3 n sets n/180 inch; the widely supported o
 # down -- likely the glyph box excludes some of the descender travel -- so the
 # real gap is roughly 7 dots smaller than the model suggests.
 #
-# Provisional until the test strip is read
-# (`scripts/calibrate_printer.py --confirm --spacing`), which prints this
-# paragraph at 6/10/14/18/22/26 so the smallest readable value can be chosen
-# by eye instead of by arithmetic.
-LEADING_DOTS = 14
+# Read from the test strip (`calibrate_printer.py --confirm --spacing`): six
+# leading values printed identically except the largest. The printer floors
+# line spacing at the character height -- about 34 dots, exactly the 1/6 inch
+# factory default -- and silently clamps anything smaller, so five of the six
+# samples came out the same. Leading below that floor is simply ignored.
+#
+# MIN_LINE_DOTS is therefore what actually controls body-text separation:
+# clearing the floor is the only way to get visible space between lines.
+LEADING_DOTS = 8
+MIN_LINE_DOTS = 40
 
 # Feed used around a QR image. The symbol itself already carries a 1-module
 # quiet zone (python-escpos builds it with border=1), so the visible gap was
@@ -191,16 +196,30 @@ def height_mm(blocks):
 # --- renderers ----------------------------------------------------------------
 
 def spacing_units(dots, divisor=SPACING_DIVISOR):
-    """Convert dots to ESC 3 units, clamped to the command's valid range."""
-    return max(0, min(255, round(dots * divisor / DPI)))
+    """Convert dots to ESC 3 units, clamped to the command's valid range.
+
+    python-escpos names the parameter `divisor=180`, which reads as "n/180
+    inch" -- but ESC 3 n actually sets n x the printer's *vertical motion
+    unit*, and on the TM-T20III that unit is 1/203 inch. One unit is therefore
+    one dot, and converting by 180/203 was shrinking every value by 12%.
+    """
+    return max(0, min(255, round(dots)))
 
 
 def line_dots(block):
-    """Vertical space one line of this block needs: cell height + leading."""
+    """Vertical space one line of this block needs.
+
+    max(cell + leading, MIN_LINE_DOTS): the floor is what gives single-height
+    text visible separation, since the printer ignores anything below it. Tall
+    text exceeds the floor on its own and uses cell + leading directly.
+    """
     font = FONTS.get(block.get('font', 'b'), FONTS['b'])
-    height = max(int(block.get('height', 1) or 1), 1)
+    try:
+        height = max(int(block.get('height', 1) or 1), 1)
+    except (TypeError, ValueError):
+        height = 1
     leading = block.get('leading', LEADING_DOTS)
-    return font['cell_h'] * height + leading
+    return max(font['cell_h'] * height + leading, MIN_LINE_DOTS)
 
 
 def render_escpos(blocks, printer):

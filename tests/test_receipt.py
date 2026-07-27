@@ -67,14 +67,19 @@ def test_no_line_exceeds_the_column_count():
 
 # --- height estimation --------------------------------------------------------
 
-def test_double_height_text_scales_the_cell_not_the_leading():
-    """Height is cell*multiplier + leading, so 2x is not exactly twice as
-    tall -- the leading is added once per line either way."""
-    single = r.block_height(r.text('x', font='a', height=1))
+def test_single_height_text_uses_the_floor():
+    """Below MIN_LINE_DOTS the printer clamps line spacing to the character
+    height and ignores the request, so small text sits at the floor."""
+    assert r.block_height(r.text('x', font='a', height=1)) == r.MIN_LINE_DOTS
+    assert r.block_height(r.text('x', font='b', height=1)) == r.MIN_LINE_DOTS
+
+
+def test_tall_text_exceeds_the_floor_and_scales():
+    """A double-height cell is taller than the floor, so it uses cell +
+    leading -- which is the whole reason the title stopped clipping."""
     double = r.block_height(r.text('x', font='a', height=2))
-    cell = r.FONTS['a']['cell_h']
-    assert single == cell + r.LEADING_DOTS
-    assert double == cell * 2 + r.LEADING_DOTS
+    assert double == r.FONTS['a']['cell_h'] * 2 + r.LEADING_DOTS
+    assert double > r.MIN_LINE_DOTS
 
 
 def test_leading_prevents_tall_text_overlapping():
@@ -100,8 +105,11 @@ def test_wrapped_text_is_taller():
     assert many > one
 
 
-def test_font_b_is_shorter_than_font_a():
-    assert r.block_height(r.text('x', font='b')) < r.block_height(r.text('x', font='a'))
+def test_font_b_is_shorter_than_font_a_once_above_the_floor():
+    """At 1x both are clamped to the floor and tie; the cell difference only
+    shows once the text is tall enough to clear it."""
+    assert (r.block_height(r.text('x', font='b', height=3))
+            < r.block_height(r.text('x', font='a', height=3)))
 
 
 def test_qr_grows_with_size():
@@ -303,7 +311,24 @@ def test_no_printed_line_exceeds_its_column_budget():
                     f'{line!r} exceeds {r.columns_for(font, width)} columns'
 
 
-def test_leading_keeps_adjacent_body_lines_apart():
-    """6 dots let adjacent font b lines touch on paper; the cell is 17."""
-    gap = r.line_dots(r.text('x', font='b')) - r.FONTS['b']['cell_h']
-    assert gap >= 8, 'body lines will look cramped or touch'
+def test_body_lines_clear_the_printers_clamp_floor():
+    """Established from a printed test strip, not arithmetic.
+
+    Six leading values came out identical except the largest, because the
+    printer floors line spacing at the character height -- about 34 dots,
+    exactly the 1/6in factory default -- and silently clamps anything below.
+    Leading under that floor has no effect at all, so body text must clear it
+    or there is no visible gap no matter what the model says.
+    """
+    for font in ('a', 'b'):
+        assert r.line_dots(r.text('x', font=font)) > 34, (
+            f'font {font} body text sits at or below the clamp floor; '
+            f'lines will touch')
+
+
+def test_spacing_units_are_dots_not_180ths():
+    """ESC 3 n sets n x the vertical motion unit, which is 1/203in on this
+    printer -- so one unit is one dot. Treating it as n/180in shrank every
+    requested spacing by 12%."""
+    assert r.spacing_units(40) == 40
+    assert r.spacing_units(56) == 56
