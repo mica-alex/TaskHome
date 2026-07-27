@@ -74,6 +74,14 @@ history = []
 listeners = {}  # New: e.g., {'scf': {'enabled': False, 'request_types': '6632,6634', 'interval': 10, 'last_check': None}}
 
 
+# Guards structural mutation of the shared state and its serialisation.
+# Deliberately NOT held across printing or HTTP fetches: those take seconds and
+# would stall every page load. It protects the operations that can actually
+# corrupt state -- appending/removing/rebinding, and json.dump reading a list
+# while another thread mutates it. Reentrant because save_* is called from
+# inside already-locked sections.
+STATE_LOCK = threading.RLock()
+
 # Stores whose load failed. Saving one of these would overwrite a file that is
 # damaged but still recoverable by hand, turning a fixable problem into
 # permanent data loss (P0-5). Saves for these names are refused.
@@ -262,9 +270,13 @@ def _save_json_file(name, path, data):
     directory = os.path.dirname(os.path.abspath(path)) or '.'
     tmp_path = None
     try:
+        with STATE_LOCK:
+            # Serialise inside the lock: json.dump iterates the live list, and
+            # a concurrent append would raise or emit a torn file.
+            payload = json.dumps(data, indent=2)
         fd, tmp_path = tempfile.mkstemp(prefix=f'.{name}-', suffix='.tmp', dir=directory)
         with os.fdopen(fd, 'w') as f:
-            json.dump(data, f, indent=2)
+            f.write(payload)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
@@ -629,8 +641,9 @@ def fire_due_task(task, now, catchup_config=None):
         task['last_missed_at'] = extra[-1]
 
     if next_time is None:
-        if task in tasks:
-            tasks.remove(task)
+        with STATE_LOCK:
+            if task in tasks:
+                tasks.remove(task)
     else:
         task['next_time'] = next_time
     return True
@@ -656,13 +669,14 @@ def open_printer():
 
 def record_history(record):
     """Prepend a print record and trim to the configured cap."""
-    history.insert(0, record)
-    max_history = config.get('max_history', DEFAULT_CONFIG['max_history'])
-    try:
-        max_history = int(max_history)
-    except (TypeError, ValueError):
-        max_history = DEFAULT_CONFIG['max_history']
-    del history[max(max_history, 0):]
+    with STATE_LOCK:
+        history.insert(0, record)
+        max_history = config.get('max_history', DEFAULT_CONFIG['max_history'])
+        try:
+            max_history = int(max_history)
+        except (TypeError, ValueError):
+            max_history = DEFAULT_CONFIG['max_history']
+        del history[max(max_history, 0):]
     save_history()
 
 
@@ -1065,10 +1079,13 @@ def task_page():
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
-    global history
     if request.method == 'POST':
         if 'clear_history' in request.form:
-            history = []
+            # Mutate in place rather than rebinding the global: rebinding
+            # detaches the module-level name from the list other code is
+            # already holding, so their writes would go to an orphan.
+            with STATE_LOCK:
+                del history[:]
             save_history()
             return redirect(url_for('settings'))
         raw_max = request.form.get('max_history', '')
@@ -1255,7 +1272,8 @@ def add_task():
         task = task_from_form(request.form)
     except ValidationError as e:
         return reject(str(e))
-    tasks.append(task)
+    with STATE_LOCK:
+        tasks.append(task)
     save_tasks()
     return redirect(url_for('task_page'))
 
@@ -1272,8 +1290,9 @@ def edit_task(task_id):
             candidate = task_from_form(request.form, existing=dict(task))
         except ValidationError as e:
             return reject(str(e))
-        task.clear()
-        task.update(candidate)
+        with STATE_LOCK:
+            task.clear()
+            task.update(candidate)
         save_tasks()
         return redirect(url_for('task_page'))
     return render_template('tasks.html', config=config, tasks=tasks,
@@ -1285,11 +1304,11 @@ def delete_task():
     task_id = request.form.get('id')
     if not task_id:
         return reject('No task specified.')
-    global tasks
-    remaining = [t for t in tasks if t.get('id') != task_id]
-    if len(remaining) == len(tasks):
-        return reject('That task no longer exists.', status=404)
-    tasks[:] = remaining
+    with STATE_LOCK:
+        remaining = [t for t in tasks if t.get('id') != task_id]
+        if len(remaining) == len(tasks):
+            return reject('That task no longer exists.', status=404)
+        tasks[:] = remaining
     save_tasks()
     return redirect(url_for('task_page'))
 

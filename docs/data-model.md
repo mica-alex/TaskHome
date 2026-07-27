@@ -47,10 +47,24 @@ the very next save wrote that empty list over the user's file — turning a
 hand-repairable JSON error into permanent data loss. This is not hypothetical:
 it destroyed a real `tasks.json` during development. See `P0-5`.
 
-> **Still outstanding:** there is no lock around the shared lists. The scheduler
-> thread and request handlers mutate the same objects, so an interleaved read
-> during mutation is still possible. Tracked as the remaining half of `P0-5`,
-> to be done with `P1-2`'s storage layer.
+### Locking
+
+`STATE_LOCK` (an `RLock`) guards structural mutation and serialisation. It is
+reentrant because `record_history` holds it and calls `save_history()`, which
+acquires it again — a plain `Lock` deadlocks there.
+
+It is deliberately **not** held across printing or HTTP fetches, which take
+seconds and would stall every page load. It covers the operations that can
+corrupt state: append/remove/clear, and `json.dumps` reading a list another
+thread is mutating.
+
+Worth knowing before anyone decides it is redundant: on stock CPython 3.13 the
+GIL already makes individual list operations and C-level `json.dumps` atomic,
+so the races it prevents are not reachable today, and the test suite passes
+without it. It is kept because that atomicity is a CPython implementation
+detail rather than a language guarantee (free-threaded builds remove it), and
+because it makes compound read-modify-write sequences correct by construction.
+`tests/test_concurrency.py` records this in full.
 
 ## config.json
 

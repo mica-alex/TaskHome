@@ -91,32 +91,54 @@ def test_one_corrupt_store_does_not_block_the_others(store):
 
 # --- atomicity ----------------------------------------------------------------
 
-def test_write_is_atomic_via_rename(store, monkeypatch):
-    """A failure mid-write must leave the previous file intact, not truncated.
+@pytest.mark.parametrize('failure_point', ['serialise', 'write', 'rename'])
+def test_failure_at_any_stage_leaves_the_previous_file_intact(
+        store, monkeypatch, failure_point):
+    """The whole point of the temp-file dance.
 
-    The old code opened the target with 'w', truncating it instantly; anything
-    that went wrong after that point left an empty or partial file.
+    The old code opened the target with 'w', truncating it instantly, so
+    anything that went wrong after that left an empty or partial file. Now a
+    failure at any stage must leave the previous content untouched.
     """
     tasks_file = store / 'tasks.json'
     tasks_file.write_text(json.dumps(REAL_TASKS))
     taskhome.load_data()
 
     def explode(*args, **kwargs):
-        raise OSError('disk full')
+        raise OSError('injected failure')
 
-    monkeypatch.setattr(taskhome.json, 'dump', explode)
-    taskhome.tasks = []
-    assert taskhome.save_tasks() is False
+    if failure_point == 'serialise':
+        monkeypatch.setattr(taskhome.json, 'dumps', explode)
+    elif failure_point == 'write':
+        monkeypatch.setattr(taskhome.os, 'fsync', explode)
+    else:
+        monkeypatch.setattr(taskhome.os, 'replace', explode)
 
-    # The original content survived.
+    taskhome.tasks[:] = []
+    taskhome.save_tasks()
+
     assert json.loads(tasks_file.read_text()) == REAL_TASKS
 
 
-def test_failed_write_leaves_no_temp_files(store, monkeypatch):
+def test_successful_write_replaces_content(store):
+    tasks_file = store / 'tasks.json'
+    tasks_file.write_text(json.dumps(REAL_TASKS))
+    taskhome.load_data()
+    taskhome.tasks[:] = []
+    assert taskhome.save_tasks() is True
+    assert json.loads(tasks_file.read_text()) == []
+
+
+@pytest.mark.parametrize('failure_point', ['write', 'rename'])
+def test_failed_write_leaves_no_temp_files(store, monkeypatch, failure_point):
     (store / 'tasks.json').write_text(json.dumps(REAL_TASKS))
     taskhome.load_data()
-    monkeypatch.setattr(taskhome.json, 'dump',
-                        lambda *a, **k: (_ for _ in ()).throw(OSError('nope')))
+
+    def explode(*args, **kwargs):
+        raise OSError('injected failure')
+
+    monkeypatch.setattr(taskhome.os,
+                        'fsync' if failure_point == 'write' else 'replace', explode)
     taskhome.save_tasks()
     leftovers = [p.name for p in store.iterdir() if p.name.endswith('.tmp')]
     assert leftovers == []
