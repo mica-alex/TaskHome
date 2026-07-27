@@ -141,20 +141,25 @@
                {% if request.endpoint == 'main.settings' %}aria-current="page"{% endif %}>Settings</a>
         </nav>
         <div class="mica-appbar-actions">
-            {% if queue_waiting %}
-            <a class="mica-chip mica-chip-accent" href="{{ url_for('main.print_queue') }}"
-               title="Receipts waiting to print">{{ queue_waiting }} queued</a>
-            {% endif %}
-            {% if printer_online is defined %}
+            {# Rendered server-side so the first paint is correct, then kept
+               true by ui.js polling /api/status (P2-5). #}
+            <a class="mica-chip mica-chip-accent" id="queue-chip"
+               href="{{ url_for('main.print_queue') }}"
+               title="Receipts waiting to print"
+               {% if not queue_waiting %}hidden{% endif %}>{{ queue_waiting or 0 }} queued</a>
             <span class="mica-status-dot {{ 'is-online' if printer_online else 'is-offline' }}"
+                  id="printer-status"
                   title="{{ 'Printer connected' if printer_online else 'Printer not connected' }}">
                 {{ 'Ready' if printer_online else 'No printer' }}
             </span>
-            {% endif %}
             <button type="button" class="mica-btn mica-btn-secondary mica-btn-icon" id="theme-toggle"
                     aria-label="Toggle theme" title="Toggle light / dark">◐</button>
         </div>
     </header>
+
+    {# Only things someone has to act on land here -- a disconnected printer
+       is normal for this appliance and is shown by the status dot instead. #}
+    <div id="status-problems" class="mica-alert mica-alert-error" role="alert" hidden></div>
 
     <main class="mica-container">
         {% block content %}

@@ -36,6 +36,12 @@
     <div class="studio-actions">
       <button type="submit" class="mica-btn">Save</button>
       <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.listener') }}">Back</a>
+      {% if listener.enabled() %}
+      {# Without this the only way to test a listener is to wait for its
+         interval -- which for weather means waiting for weather. #}
+      <button type="button" class="mica-btn mica-btn-secondary"
+              data-poll-now="{{ listener.name }}">Check now</button>
+      {% endif %}
     </div>
   </form>
 </div>

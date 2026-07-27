@@ -492,6 +492,94 @@ def api_queue_retry():
             'remaining': remaining}
 
 
+@bp.route('/api/history/reprint/<uid>', methods=['POST'])
+def api_history_reprint(uid):
+    """Reprint a history record (P4-6).
+
+    Addressed by `uid`, a handle assigned when the record is written and
+    back-filled on load for older records. Not by list position, which stops
+    being an identity the moment the table is filtered, searched, paged or
+    trimmed by max_history; and not by the record's own id, because the three
+    record types draw ids from different namespaces and can collide.
+
+    Re-rendered from today's active template rather than replayed from stored
+    blocks, because the reason to reprint is usually that the receipt was torn,
+    smudged or lost -- you want the current layout, not a byte-perfect copy of
+    a receipt printed under settings that have since changed. (The print queue
+    is the opposite case and stores blocks for exactly that reason.)
+    """
+    with state.STATE_LOCK:
+        match = next((r for r in state.history if r.get('uid') == uid), None)
+    if match is None:
+        return {'ok': False, 'error': 'That history entry no longer exists.'}, 404
+    record = dict(match)
+
+    try:
+        blocks = reprint_blocks(record)
+    except Exception as e:
+        log.error(f"Could not rebuild receipt for reprint: {e}", exc_info=True)
+        return {'ok': False, 'error': 'That receipt could not be rebuilt.'}, 500
+
+    if printing.print_blocks(blocks):
+        # Deliberately not recorded in history. History is the record of
+        # scheduled and triggered prints; a reprint of an existing row would
+        # make the list grow every time someone re-ran one, and the second copy
+        # would look like a second occurrence.
+        log.info(f"Reprinted history entry: {pagination.history_title(record)}")
+        return {'ok': True}
+    return {'ok': False, 'error': 'Printer not connected.'}, 503
+
+
+def reprint_blocks(record):
+    """Rebuild a receipt from a history record, whatever kind it is."""
+    kind = record.get('type', 'task')
+    if kind == 'task':
+        return printing.task_blocks(record)
+
+    listener = listener_base.get(kind)
+    if listener is not None and kind in styles.kinds():
+        template = styles.get_template(kind, styles.active_template_name(kind))
+        # A history record is a projection of the item, not the item itself, so
+        # it is filled directly rather than through listener.context().
+        return styles.fill(template, styles.sample_context(kind, record))
+
+    # SCF predates the plugin interface and keeps its own projection.
+    return printing.scf_blocks(
+        {'id': record.get('id'), 'html_url': record.get('url', '')},
+        category=record.get('category', ''), address=record.get('address', ''),
+        status=record.get('status', ''), reported_at=record.get('reported_at', ''),
+        has_media=record.get('has_media', False),
+        has_video=record.get('has_video', False),
+        description=record.get('description', ''))
+
+
+@bp.route('/api/listeners/<name>/poll', methods=['POST'])
+def api_listener_poll(name):
+    """Poll a listener right now instead of waiting for its interval (P4-6).
+
+    Makes the whole pipeline debuggable: configure, press the button, see
+    whether anything comes out and what the log says. Without this the only
+    way to test a listener is to wait, which for NWS means waiting for weather.
+    """
+    listener = listener_base.get(name)
+    if listener is None:
+        return {'ok': False, 'error': 'Unknown listener.'}, 404
+    if not listener.enabled():
+        return {'ok': False, 'error': f'{listener.title} is switched off.'}, 400
+
+    # Clear the interval gate for this one call, so "poll now" means now.
+    runtime = listener.state()
+    saved = runtime.pop('last_check', None), runtime.pop('backoff_until', None)
+    try:
+        printed = listener_base.run(listener, datetime.now(timezone.utc))
+    except Exception as e:
+        log.error(f"Manual poll of {name} failed: {e}", exc_info=True)
+        runtime['last_check'], runtime['backoff_until'] = saved
+        return {'ok': False, 'error': str(e)}, 502
+    return {'ok': True, 'printed': printed,
+            'last_error': runtime.get('last_error')}
+
+
 @bp.route('/api/queue/<job_id>', methods=['DELETE'])
 def api_queue_discard(job_id):
     removed = queue.discard(None if job_id == 'all' else job_id)

@@ -160,3 +160,161 @@
                    wireRecurrence: wireRecurrence, wireTimestamps: wireTimestamps,
                    formatStamp: formatStamp, parseStamp: parseStamp};
 })(window);
+
+/*
+ * Live status (MASTER_PLAN P2-5).
+ *
+ * Plain fetch on an interval, not SSE or WebSockets. One or two LAN clients
+ * and a 60-second scheduler granularity do not justify long-lived connections
+ * and the proxy/timeout care they need.
+ *
+ * The appbar already renders printer state server-side on page load; this
+ * keeps it true without a refresh, and adds the two things that are otherwise
+ * invisible: queue depth, and whether the scheduler is still ticking.
+ */
+(function () {
+    'use strict';
+
+    var INTERVAL_MS = 10000;
+    var timer = null;
+    var failures = 0;
+
+    function el(id) { return document.getElementById(id); }
+
+    function setDot(status) {
+        var dot = el('printer-status');
+        if (!dot) return;
+        var online = status.printer.connected;
+        dot.classList.toggle('is-online', online);
+        dot.classList.toggle('is-offline', !online);
+        dot.textContent = online ? 'Ready' : 'No printer';
+        dot.title = online ? 'Printer connected' : 'Printer not connected';
+    }
+
+    function setQueue(status) {
+        var chip = el('queue-chip');
+        if (!chip) return;
+        var waiting = status.queue.waiting || 0;
+        chip.hidden = waiting === 0;
+        chip.textContent = waiting + ' queued';
+        chip.title = status.queue.paper_mm
+            ? 'About ' + status.queue.paper_mm + ' mm of paper waiting'
+            : 'Receipts waiting to print';
+    }
+
+    function setProblems(status) {
+        var banner = el('status-problems');
+        if (!banner) return;
+        // Only surface what someone has to act on. A disconnected printer is
+        // normal for this appliance and is already shown by the dot.
+        if (!status.problems || !status.problems.length) {
+            banner.hidden = true;
+            return;
+        }
+        banner.hidden = false;
+        banner.innerHTML = '';
+        status.problems.forEach(function (text) {
+            var line = document.createElement('div');
+            line.textContent = text;
+            banner.appendChild(line);
+        });
+    }
+
+    function apply(status) {
+        failures = 0;
+        document.body.classList.remove('is-disconnected');
+        setDot(status);
+        setQueue(status);
+        setProblems(status);
+    }
+
+    function poll() {
+        fetch('/api/status', {headers: {'Accept': 'application/json'}})
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+            .then(apply)
+            .catch(function () {
+                // Two consecutive failures before saying anything: one is a
+                // restart or a dropped packet, and flashing "disconnected"
+                // every time the app reloads would be noise.
+                if (++failures >= 2) document.body.classList.add('is-disconnected');
+            });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!el('printer-status') && !el('queue-chip')) return;
+        poll();
+        timer = setInterval(poll, INTERVAL_MS);
+    });
+
+    // Stop polling while the tab is hidden. On a phone left open on the
+    // counter this is the difference between a background tab that costs
+    // nothing and one that wakes the radio every ten seconds all day.
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            clearInterval(timer);
+            timer = null;
+        } else if (!timer) {
+            poll();
+            timer = setInterval(poll, INTERVAL_MS);
+        }
+    });
+})();
+
+/*
+ * Reprint and poll-now (MASTER_PLAN P4-6).
+ *
+ * Both emit real paper, so both confirm first. A misclick here costs a receipt
+ * and, for poll-now on a listener with a backlog, potentially several.
+ */
+(function () {
+    'use strict';
+
+    function busy(button, label) {
+        button.disabled = true;
+        button.dataset.label = button.textContent;
+        button.textContent = label;
+    }
+
+    function done(button) {
+        button.disabled = false;
+        if (button.dataset.label) button.textContent = button.dataset.label;
+    }
+
+    document.addEventListener('click', function (e) {
+        var reprint = e.target.closest('[data-reprint]');
+        if (reprint) {
+            if (!confirm('Print this receipt again?')) return;
+            busy(reprint, 'Printing...');
+            fetch('/api/history/reprint/' + encodeURIComponent(reprint.dataset.reprint),
+                  {method: 'POST'})
+                .then(function (r) { return r.json().then(function (d) { return [r.ok, d]; }); })
+                .then(function (result) {
+                    toast(result[0] ? 'Reprinted.' : (result[1].error || 'Reprint failed.'),
+                          result[0] ? '' : 'error');
+                })
+                .catch(function () { toast('Reprint failed.', 'error'); })
+                .finally(function () { done(reprint); });
+            return;
+        }
+
+        var poll = e.target.closest('[data-poll-now]');
+        if (poll) {
+            if (!confirm('Check now? Anything new will print immediately.')) return;
+            busy(poll, 'Checking...');
+            fetch('/api/listeners/' + encodeURIComponent(poll.dataset.pollNow) + '/poll',
+                  {method: 'POST'})
+                .then(function (r) { return r.json().then(function (d) { return [r.ok, d]; }); })
+                .then(function (result) {
+                    var ok = result[0], data = result[1];
+                    if (!ok) { toast(data.error || 'Check failed.', 'error'); return; }
+                    // "0 printed" is a real, useful answer here -- it means the
+                    // pipeline works and there is genuinely nothing new.
+                    toast(data.printed
+                        ? data.printed + ' receipt(s) printed.'
+                        : 'Checked - nothing new.');
+                })
+                .catch(function () { toast('Check failed.', 'error'); })
+                .finally(function () { done(poll); });
+        }
+    });
+})();

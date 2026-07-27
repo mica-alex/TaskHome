@@ -6,6 +6,7 @@ defaults -- the chain that destroyed a real tasks.json (P0-5).
 """
 import json
 import os
+import uuid
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -174,6 +175,12 @@ def load_data():
         for item in state.history:  # Add type to existing state.history if missing
             if 'type' not in item:
                 item['type'] = 'task'
+            # A stable handle for the row (P4-6). History holds three record
+            # types whose ids come from different namespaces -- a task id and
+            # an SCF issue id can collide -- and a list position stops being
+            # an identity once the list is filtered, paged or trimmed.
+            if 'uid' not in item:
+                item['uid'] = uuid.uuid4().hex
         log.debug(f"Loaded {len(state.history)} state.history records")
 
     listeners_path = os.path.abspath(constants.LISTENERS_FILE)

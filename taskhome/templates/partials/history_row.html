@@ -14,4 +14,14 @@
   </td>
   <td>{{ history_title(item) }}</td>
   <td>{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
+  {% if show_reprint %}
+  <td class="row-actions">
+    {# Rebuilt from today's active template, not replayed byte-for-byte: the
+       reason to reprint is usually a torn or lost receipt, so you want the
+       current layout. #}
+    <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+            data-reprint="{{ item.uid }}"
+            title="Print this receipt again">Reprint</button>
+  </td>
+  {% endif %}
 </tr>

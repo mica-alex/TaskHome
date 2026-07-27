@@ -100,6 +100,12 @@ def scheduler_loop():
 
     while True:
         log.debug("Scheduler loop iteration started")
+        global _heartbeat, _tick_count
+        # Stamped before the work, not after: a tick that hangs mid-print
+        # should still show when it started, which is what makes the age
+        # meaningful.
+        _heartbeat = datetime.now(timezone.utc)
+        _tick_count += 1
         try:
             now = datetime.now()
             now_utc = datetime.now(timezone.utc)
@@ -124,6 +130,23 @@ def scheduler_loop():
 
 
 _thread = None
+
+#: Set at the top of every tick. A heartbeat that has stopped advancing is the
+#: only way to notice the scheduler thread has died or wedged -- the web UI
+#: keeps serving perfectly either way, so nothing else would show it (P6-4).
+#: This is exactly the P0-1 / P0-2 class of hang, which used to be invisible
+#: until someone noticed the receipts had stopped.
+_heartbeat = None
+_tick_count = 0
+
+
+def heartbeat():
+    """(last_tick_utc | None, tick_count)."""
+    return _heartbeat, _tick_count
+
+
+def is_alive():
+    return _thread is not None and _thread.is_alive()
 
 
 def start_scheduler():

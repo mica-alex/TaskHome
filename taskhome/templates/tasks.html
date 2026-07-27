@@ -65,13 +65,13 @@
 
   <div class="mica-table-scroll">
     <table class="mica-table">
-      <thead><tr><th>Type</th><th>Title</th><th>Print Time</th></tr></thead>
+      <thead><tr><th>Type</th><th>Title</th><th>Print Time</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>
         {% for item in history %}
-        {% include 'partials/history_row.html' %}
+        {% with show_reprint = true %}{% include 'partials/history_row.html' %}{% endwith %}
         {% else %}
         <tr>
-          <td colspan="3" class="empty-state">
+          <td colspan="4" class="empty-state">
             {% if query or kind %}No history matches that search.{% else %}Nothing has printed yet.{% endif %}
           </td>
         </tr>

@@ -8,6 +8,7 @@ test-print routes report the real outcome (P0-10).
 Layouts live in layouts.py as block lists rendered by receipt.py, so the
 preview and the printer share one definition (P3-2).
 """
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -47,6 +48,7 @@ def open_printer():
 
 def record_history(record):
     """Prepend a print record and trim to the configured cap."""
+    record.setdefault('uid', uuid.uuid4().hex)
     with state.STATE_LOCK:
         state.history.insert(0, record)
         max_history = state.config.get('max_history', constants.DEFAULT_CONFIG['max_history'])
