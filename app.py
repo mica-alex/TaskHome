@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import threading
 import time
 import uuid
@@ -24,93 +25,159 @@ CONFIG_FILE = 'config.json'
 TASKS_FILE = 'tasks.json'
 HISTORY_FILE = 'history.json'
 LISTENERS_FILE = 'listeners.json'  # New file for listener configs
+
+# Catch-up policy (P1-10): what happens to occurrences that came due while
+# TaskHome was down. Resolution order is per-task 'catchup', then
+# oneoff_policy for one-offs, then policy. See docs/scheduling.md.
+CATCHUP_POLICIES = ('skip', 'print_once', 'print_all', 'print_if_recent')
+DEFAULT_CATCHUP = {
+    'policy': 'skip',              # recurring: losing one of many occurrences
+    'oneoff_policy': 'print_once',  # one-off: skipping means it NEVER prints
+    'recent_window_hours': 6,
+    'max_prints': 20,
+}
+
 PRINTER_MANUFACTURER = 'Epson'
 PRINTER_MODEL = 'TM-T20III'
 PRINTER_CONNECTION = 'USB'
 
 # Global data
-config = {'max_history': 500, 'hostname': 'localhost', 'theme': 'system'}
+DEFAULT_CONFIG = {'max_history': 500, 'hostname': 'localhost', 'theme': 'system'}
+config = dict(DEFAULT_CONFIG)
 tasks = []
 history = []
 listeners = {}  # New: e.g., {'scf': {'enabled': False, 'request_types': '6632,6634', 'interval': 10, 'last_check': None}}
 
 
+# Stores whose load failed. Saving one of these would overwrite a file that is
+# damaged but still recoverable by hand, turning a fixable problem into
+# permanent data loss (P0-5). Saves for these names are refused.
+_load_failed = set()
+
+
+def _load_json_file(name, path, default):
+    """Load one JSON file. Returns (value, ok).
+
+    A missing file is fine — it yields the default and ok=True. A file that
+    exists but won't parse is NOT fine: it returns ok=False so that saves are
+    blocked rather than silently overwriting the user's data with defaults.
+    """
+    if not os.path.exists(path):
+        app.logger.warning(f"{name} file not found: {path}")
+        return default, True
+    try:
+        with open(path, 'r') as f:
+            return json.load(f), True
+    except (json.JSONDecodeError, OSError) as e:
+        app.logger.error(
+            f"FAILED to load {name} from {path}: {e}. "
+            f"Refusing to overwrite it; fix or remove the file and restart. "
+            f"A copy of the current in-memory state will NOT be saved over it.")
+        _load_failed.add(name)
+        return default, False
+
+
 def load_data():
     global config, tasks, history, listeners
     app.logger.debug("Entering load_data")
-    try:
-        config_path = os.path.abspath(CONFIG_FILE)
-        tasks_path = os.path.abspath(TASKS_FILE)
-        history_path = os.path.abspath(HISTORY_FILE)
-        listeners_path = os.path.abspath(LISTENERS_FILE)  # New
+    _load_failed.clear()
 
-        app.logger.debug(f"Checking config file: {config_path}")
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                app.logger.debug(f"Loaded config: {config}")
-                if config.get('theme') == 'high-contrast':
-                    config['theme'] = 'system'
-                    app.logger.debug("Converted high-contrast theme to system")
-        else:
-            app.logger.warning(f"Config file not found: {config_path}")
+    loaded_config, ok = _load_json_file('config', os.path.abspath(CONFIG_FILE), None)
+    if ok and loaded_config is not None:
+        # Merge over defaults rather than replacing, so a file missing a key
+        # can't break code that reads config['hostname'] (P1-6).
+        merged = dict(DEFAULT_CONFIG)
+        if isinstance(loaded_config, dict):
+            merged.update(loaded_config)
+        if merged.get('theme') == 'high-contrast':
+            merged['theme'] = 'system'
+            app.logger.debug("Converted high-contrast theme to system")
+        config = merged
+        app.logger.debug(f"Loaded config with {len(config)} keys")
 
-        app.logger.debug(f"Checking tasks file: {tasks_path}")
-        if os.path.exists(tasks_path):
-            with open(tasks_path, 'r') as f:
-                tasks = json.load(f)
-                app.logger.debug(f"Loaded tasks: {tasks}")
-                for task in tasks:
-                    if 'enabled' not in task:
-                        task['enabled'] = True
-                        app.logger.debug(f"Added 'enabled' to task: {task}")
-        else:
-            app.logger.warning(f"Tasks file not found: {tasks_path}")
+    loaded_tasks, ok = _load_json_file('tasks', os.path.abspath(TASKS_FILE), None)
+    if ok and loaded_tasks is not None:
+        tasks = loaded_tasks
+        for task in tasks:
+            if 'enabled' not in task:
+                task['enabled'] = True
+        app.logger.debug(f"Loaded {len(tasks)} tasks")
 
-        app.logger.debug(f"Checking history file: {history_path}")
-        if os.path.exists(history_path):
-            with open(history_path, 'r') as f:
-                history = json.load(f)
-                app.logger.debug(f"Loaded history: {history}")
-                for item in history:  # Add type to existing history if missing
-                    if 'type' not in item:
-                        item['type'] = 'task'
-        else:
-            app.logger.warning(f"History file not found: {history_path}")
+    loaded_history, ok = _load_json_file('history', os.path.abspath(HISTORY_FILE), None)
+    if ok and loaded_history is not None:
+        history = loaded_history
+        for item in history:  # Add type to existing history if missing
+            if 'type' not in item:
+                item['type'] = 'task'
+        app.logger.debug(f"Loaded {len(history)} history records")
 
-        # New: Load listeners
-        app.logger.debug(f"Checking listeners file: {listeners_path}")
-        if os.path.exists(listeners_path):
-            with open(listeners_path, 'r') as f:
-                listeners = json.load(f)
-                app.logger.debug(f"Loaded listeners: {listeners}")
+    listeners_path = os.path.abspath(LISTENERS_FILE)
+    loaded_listeners, ok = _load_json_file('listeners', listeners_path, None)
+    if ok:
+        if loaded_listeners is not None:
+            listeners = loaded_listeners
+            app.logger.debug(f"Loaded listeners: {list(listeners)}")
         else:
-            listeners = {'scf': {'enabled': False, 'request_types': '6632,6634', 'interval': 10, 'last_check': None}}
+            listeners = {'scf': {'enabled': False, 'request_types': '6632,6634',
+                                 'interval': 10, 'last_check': None}}
             save_listeners()
             app.logger.warning(f"Listeners file not found, created default: {listeners_path}")
-    except Exception as e:
-        app.logger.error(f"Error in load_data: {e}", exc_info=True)
+
+    if _load_failed:
+        app.logger.error(
+            f"Startup completed with unreadable stores: {sorted(_load_failed)}. "
+            f"Writes to these are disabled until the files are fixed and TaskHome restarts.")
     app.logger.debug("Exiting load_data")
 
 
+def _save_json_file(name, path, data):
+    """Write JSON atomically, refusing to clobber a store that failed to load.
+
+    Non-atomic whole-file rewrites were losing data on interruption: the file
+    is truncated the moment it's opened for writing, so a crash or a kill
+    between truncate and flush leaves nothing (P0-5). Write to a temp file in
+    the same directory, fsync, then rename — rename is atomic, so a reader
+    sees either the old file or the new one, never a partial one.
+    """
+    if name in _load_failed:
+        app.logger.error(
+            f"Refusing to save {name}: its file failed to load, so writing "
+            f"would destroy recoverable data. Fix {path} and restart.")
+        return False
+    directory = os.path.dirname(os.path.abspath(path)) or '.'
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=f'.{name}-', suffix='.tmp', dir=directory)
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        return True
+    except OSError as e:
+        app.logger.error(f"Failed to save {name} to {path}: {e}")
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return False
+
+
 def save_config():
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f)
+    return _save_json_file('config', CONFIG_FILE, config)
 
 
 def save_tasks():
-    with open(TASKS_FILE, 'w') as f:
-        json.dump(tasks, f)
+    return _save_json_file('tasks', TASKS_FILE, tasks)
 
 
 def save_history():
-    with open(HISTORY_FILE, 'w') as f:
-        json.dump(history, f)
+    return _save_json_file('history', HISTORY_FILE, history)
 
 
 def save_listeners():  # New
-    with open(LISTENERS_FILE, 'w') as f:
-        json.dump(listeners, f)
+    return _save_json_file('listeners', LISTENERS_FILE, listeners)
 
 
 def get_host():
@@ -147,6 +214,14 @@ def is_printer_connected():
 
 
 def calculate_next(next_time_str, recurring, days=None):
+    """Return the next occurrence after next_time_str, as a naive local ISO string.
+
+    Returns the input UNCHANGED when it cannot advance (unknown recurrence,
+    'none', or a weekday rule that matches nothing). Callers must treat an
+    unchanged return as "no next occurrence" and must never loop on it — see
+    advance_schedule, which enforces that. Weekday searches are bounded to a
+    single week: a rule that hasn't matched in 7 days never will (P0-2).
+    """
     app.logger.debug(f"Calculating next time from {next_time_str} with recurring={recurring} and days={days}")
     next_time = datetime.fromisoformat(next_time_str)
     if recurring == 'daily':
@@ -156,20 +231,260 @@ def calculate_next(next_time_str, recurring, days=None):
     elif recurring == 'monthly':
         return (next_time + relativedelta(months=1)).isoformat()
     elif recurring == 'every_weekday':
-        while True:
+        for _ in range(7):
             next_time += timedelta(days=1)
             if next_time.weekday() < 5:
                 return next_time.isoformat()
+        return next_time_str  # unreachable: some day in any 7 is a weekday
     elif recurring == 'first_day_month':
         return (next_time + relativedelta(months=1, day=1)).isoformat()
     elif recurring == 'custom':
-        if not days:
-            days = []
-        while True:
+        valid_days = {d for d in (days or []) if isinstance(d, int) and 0 <= d <= 6}
+        if not valid_days:
+            app.logger.error(
+                f"Custom recurrence with no valid days ({days!r}); cannot advance")
+            return next_time_str
+        for _ in range(7):
             next_time += timedelta(days=1)
-            if next_time.weekday() in days:
+            if next_time.weekday() in valid_days:
                 return next_time.isoformat()
+        return next_time_str
     return next_time_str
+
+
+class ScheduleError(Exception):
+    """A task's recurrence cannot be advanced. Never raised into the caller's
+    loop condition — always caught per-task so one bad task can't stall the
+    scheduler (P0-6)."""
+
+
+def parse_task_time(value):
+    """Parse a task timestamp into a naive local datetime.
+
+    Task times are naive local wall-clock (see docs/scheduling.md). Aware
+    values that somehow reach us are converted to local and stripped, so
+    comparisons stay in one frame (P0-3).
+    """
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def get_catchup_config():
+    """Catch-up settings merged over defaults, with invalid values dropped.
+
+    Never raises: a malformed config degrades to defaults with a warning
+    rather than taking down the scheduler (X-4).
+    """
+    resolved = dict(DEFAULT_CATCHUP)
+    stored = config.get('catchup')
+    if isinstance(stored, dict):
+        for key, value in stored.items():
+            if key in resolved:
+                resolved[key] = value
+
+    if resolved['policy'] not in CATCHUP_POLICIES:
+        app.logger.warning(
+            f"Invalid catchup.policy {resolved['policy']!r}, using {DEFAULT_CATCHUP['policy']!r}")
+        resolved['policy'] = DEFAULT_CATCHUP['policy']
+    if resolved['oneoff_policy'] not in CATCHUP_POLICIES:
+        app.logger.warning(
+            f"Invalid catchup.oneoff_policy {resolved['oneoff_policy']!r}, "
+            f"using {DEFAULT_CATCHUP['oneoff_policy']!r}")
+        resolved['oneoff_policy'] = DEFAULT_CATCHUP['oneoff_policy']
+    for key in ('recent_window_hours', 'max_prints'):
+        try:
+            resolved[key] = int(resolved[key])
+        except (TypeError, ValueError):
+            app.logger.warning(f"Invalid catchup.{key} {resolved[key]!r}, using default")
+            resolved[key] = DEFAULT_CATCHUP[key]
+        if resolved[key] < 0:
+            app.logger.warning(f"Negative catchup.{key}, using default")
+            resolved[key] = DEFAULT_CATCHUP[key]
+    return resolved
+
+
+def resolve_catchup_policy(task, catchup_config=None):
+    """Which catch-up policy applies to this task. First match wins:
+    explicit per-task setting, then the one-off default, then the global.
+    """
+    cfg = catchup_config or get_catchup_config()
+    explicit = task.get('catchup', 'inherit')
+    if explicit != 'inherit':
+        if explicit in CATCHUP_POLICIES:
+            return explicit
+        app.logger.warning(
+            f"Task {task.get('id')} has invalid catchup {explicit!r}; falling back to inherit")
+    if task.get('recurring') == 'none':
+        return cfg['oneoff_policy']
+    return cfg['policy']
+
+
+def advance_schedule(task, now, max_iterations=4096):
+    """Roll a task's schedule forward past `now`.
+
+    Returns (next_time_str_or_None, missed) where `missed` lists the
+    occurrences stepped over, oldest first, and None means the task has no
+    future occurrence (a one-off that has already come due).
+
+    Guarantees it never iterates without advancing — the fix for P0-1 and the
+    backstop for any future recurrence mode. Raises ScheduleError instead of
+    spinning.
+    """
+    recurring = task.get('recurring', 'none')
+    current_str = task['next_time']
+    current = parse_task_time(current_str)
+
+    if current > now:
+        return current_str, []
+    if recurring == 'none':
+        return None, [current_str]
+
+    missed = []
+    for _ in range(max_iterations):
+        candidate_str = calculate_next(current_str, recurring, task.get('days'))
+        if candidate_str == current_str:
+            raise ScheduleError(
+                f"recurrence {recurring!r} did not advance from {current_str}")
+        candidate = parse_task_time(candidate_str)
+        if candidate <= current:
+            raise ScheduleError(
+                f"recurrence {recurring!r} moved backwards: {current_str} -> {candidate_str}")
+        missed.append(current_str)
+        current_str, current = candidate_str, candidate
+        if current > now:
+            return current_str, missed
+    raise ScheduleError(
+        f"recurrence {recurring!r} exceeded {max_iterations} steps from {task['next_time']}")
+
+
+def select_catchup_prints(missed, policy, cfg, now):
+    """Which missed occurrences to print, and how many were dropped.
+
+    Returns (occurrences, dropped). For print_once the caller emits a single
+    summary receipt rather than one per occurrence.
+    """
+    if policy == 'skip' or not missed:
+        return [], 0
+    if policy == 'print_once':
+        return missed[-1:], 0
+
+    candidates = missed
+    if policy == 'print_if_recent':
+        cutoff = now - timedelta(hours=cfg['recent_window_hours'])
+        candidates = [occ for occ in missed if parse_task_time(occ) >= cutoff]
+
+    cap = cfg['max_prints']
+    if len(candidates) > cap:
+        # Keep the most recent; they are the ones still worth acting on.
+        return candidates[-cap:], len(candidates) - cap
+    return candidates, 0
+
+
+def _format_occurrence(occurrence):
+    try:
+        return parse_task_time(occurrence).strftime('%a %b %d, %I:%M %p')
+    except (ValueError, TypeError):
+        return str(occurrence)
+
+
+def _with_note(task, note):
+    """Copy of the task with `note` appended to its extra line, so catch-up
+    receipts are visibly distinct from on-time ones."""
+    copy = dict(task)
+    existing = copy.get('extra')
+    copy['extra'] = f"{existing}\n{note}" if existing else note
+    copy['catchup'] = True
+    return copy
+
+
+def print_catchup(task, occurrences, missed_total, dropped, policy):
+    """Emit receipts for missed occurrences per the resolved policy."""
+    if policy == 'print_once':
+        note = (f"MISSED {missed_total}x while offline"
+                f" - most recent {_format_occurrence(occurrences[0])}")
+        print_task(_with_note(task, note))
+        return
+    for occurrence in occurrences:
+        print_task(_with_note(task, f"MISSED occurrence - was due {_format_occurrence(occurrence)}"))
+    if dropped:
+        # Never truncate silently (X-4).
+        print_task(_with_note(
+            task, f"... and {dropped} older missed occurrence(s) not printed"))
+
+
+def apply_catchup(task, now, catchup_config=None):
+    """Bring one task up to date. Returns True if the task was modified.
+
+    Raises ScheduleError if the recurrence is unusable; callers isolate that
+    per task.
+    """
+    cfg = catchup_config or get_catchup_config()
+    next_time, missed = advance_schedule(task, now)
+    if not missed:
+        return False
+
+    policy = resolve_catchup_policy(task, cfg)
+    occurrences, dropped = select_catchup_prints(missed, policy, cfg, now)
+    app.logger.info(
+        f"Catch-up for task {task.get('id')}: {len(missed)} missed, policy={policy}, "
+        f"printing {len(occurrences)}, dropping {dropped}")
+    if occurrences:
+        print_catchup(task, occurrences, len(missed), dropped, policy)
+
+    task['missed_count'] = task.get('missed_count', 0) + len(missed)
+    task['last_missed_at'] = missed[-1]
+    if next_time is None:
+        # A one-off with no future occurrence. Leaving it enabled would make
+        # the steady-state loop fire it immediately, contradicting the policy;
+        # mark it missed so the UI can show it instead of it vanishing.
+        task['enabled'] = False
+        task['missed'] = True
+    else:
+        task['next_time'] = next_time
+    return True
+
+
+def run_catchup(now=None):
+    """Startup catch-up across all enabled tasks. Returns tasks changed."""
+    now = now or datetime.now()
+    cfg = get_catchup_config()
+    changed = 0
+    for task in list(tasks):
+        if not task.get('enabled', True):
+            continue
+        try:
+            if apply_catchup(task, now, cfg):
+                changed += 1
+        except (ScheduleError, ValueError) as e:
+            # Disable rather than leave a task that can never advance or whose
+            # next_time can't be parsed: it would otherwise be retried, and
+            # logged, every tick forever.
+            task['enabled'] = False
+            task['schedule_error'] = str(e)
+            changed += 1
+            app.logger.error(f"Disabling task {task.get('id')} - {e}")
+        except Exception as e:
+            app.logger.error(f"Catch-up failed for task {task.get('id')}: {e}", exc_info=True)
+    if changed:
+        save_tasks()
+    return changed
+
+
+def fire_due_task(task, now):
+    """Print a task if it is due and reschedule it. Returns True if it fired."""
+    if parse_task_time(task['next_time']) > now:
+        return False
+
+    print_task(task)
+    next_time, _missed = advance_schedule(task, now)
+    if next_time is None:
+        if task in tasks:
+            tasks.remove(task)
+    else:
+        task['next_time'] = next_time
+    return True
 
 
 def print_task(task):
@@ -300,39 +615,40 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         app.logger.error(f"SCF issue print error: {e}")
 
 
-def scheduler_loop():
-    # Handle missed tasks on startup
-    now = datetime.now(timezone.utc)  # Assuming times are in UTC
-    for task in tasks:
+def run_due_tasks(now):
+    """Fire every due task. Each task is isolated: one unusable task cannot
+    stall the others or the listener poll (P0-6). Returns tasks fired."""
+    fired = 0
+    for task in list(tasks):
         if not task.get('enabled', True):
             continue
         try:
-            next_time_str = task['next_time']
-            next_time = datetime.fromisoformat(next_time_str).replace(tzinfo=timezone.utc)
-            while next_time < now:
-                next_time_str = calculate_next(next_time_str, task['recurring'], task.get('days'))
-                next_time = datetime.fromisoformat(next_time_str).replace(tzinfo=timezone.utc)
-            task['next_time'] = next_time_str
+            if fire_due_task(task, now):
+                fired += 1
+        except (ScheduleError, ValueError) as e:
+            task['enabled'] = False
+            task['schedule_error'] = str(e)
+            fired += 1  # forces a save
+            app.logger.error(f"Disabling task {task.get('id')} - {e}")
         except Exception as e:
-            app.logger.error(f"Error handling missed task {task['id']}: {e}")
-    save_tasks()
+            app.logger.error(
+                f"Error firing task {task.get('id')}: {e}", exc_info=True)
+    if fired:
+        save_tasks()
+    return fired
+
+
+def scheduler_loop():
+    # Times are naive local wall-clock throughout (P0-3): the catch-up and the
+    # steady-state loop must compare in the same frame as the stored values.
+    run_catchup(datetime.now())
 
     while True:
         app.logger.debug("Scheduler loop iteration started")
         try:
             now = datetime.now()
             now_utc = datetime.now(timezone.utc)
-            for task in tasks[:]:
-                if not task.get('enabled', True):
-                    continue
-                next_time = datetime.fromisoformat(task['next_time'])
-                if next_time <= now:
-                    print_task(task)
-                    if task['recurring'] == 'none':
-                        tasks.remove(task)
-                    else:
-                        task['next_time'] = calculate_next(task['next_time'], task['recurring'], task.get('days'))
-                    save_tasks()
+            run_due_tasks(now)
 
             # New: Check listeners (e.g., SCF)
             if 'scf' in listeners:
@@ -401,14 +717,15 @@ def scheduler_loop():
 def index():
     status = 'Connected' if is_printer_connected() else 'Not connected'
     recent_history = history[:5]
-    scheduled_tasks = [t for t in tasks if t.get('enabled', True)]
-    return render_template('index.html', status=status, config=config, tasks=scheduled_tasks, history=recent_history)
+    # All tasks, not just enabled ones: a task disabled by a schedule error or
+    # a missed one-off must stay visible (P0-13, and P1-10's promise that
+    # skipping isn't vanishing). The template renders the status.
+    return render_template('index.html', status=status, config=config, tasks=tasks, history=recent_history)
 
 
 @app.route('/task_page')
 def task_page():
-    scheduled_tasks = [t for t in tasks if t.get('enabled', True)]
-    return render_template('tasks.html', config=config, tasks=scheduled_tasks, history=history)
+    return render_template('tasks.html', config=config, tasks=tasks, history=history)
 
 
 @app.route('/settings', methods=['GET', 'POST'])
@@ -529,7 +846,7 @@ def edit_task(task_id):
             task.pop('days', None)
         save_tasks()
         return redirect(url_for('task_page'))
-    return render_template('tasks.html', config=config, tasks=[t for t in tasks if t.get('enabled', True)],
+    return render_template('tasks.html', config=config, tasks=tasks,
                            history=history, edit_task=task)
 
 
@@ -557,11 +874,37 @@ def listener():
     return render_template('listener.html', config=config, scf=listeners.get('scf', {}))
 
 
-# Initialize app
-load_data()
-scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
-scheduler_thread.start()
-app.logger.debug("Initialization complete: Data loaded and scheduler started")
+scheduler_thread = None
+
+
+def start_scheduler():
+    """Start the scheduler thread, refusing to start a second one.
+
+    Partial mitigation for P0-12: under the Flask reloader or a multi-worker
+    server the module can be imported more than once. This guard only covers
+    repeat starts within one process; the full fix is an app factory (P1-3).
+    """
+    global scheduler_thread
+    if scheduler_thread is not None and scheduler_thread.is_alive():
+        app.logger.warning("Scheduler already running; not starting another")
+        return scheduler_thread
+    scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
+    scheduler_thread.start()
+    return scheduler_thread
+
+
+def init_app(load=True, scheduler=True):
+    if load:
+        load_data()
+    if scheduler:
+        start_scheduler()
+    app.logger.debug("Initialization complete: Data loaded and scheduler started")
+
+
+# Initialize app. TASKHOME_NO_INIT lets tests import this module without
+# reading the user's real JSON files or starting a thread that prints.
+if os.environ.get('TASKHOME_NO_INIT') != '1':
+    init_app(scheduler=os.environ.get('TASKHOME_NO_SCHEDULER') != '1')
 
 if __name__ == '__main__':
     app.logger.debug("Running directly via python app.py")

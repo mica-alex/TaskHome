@@ -13,15 +13,17 @@
                         <th>Title</th>
                         <th>Next Time</th>
                         <th>Recurring</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for task in tasks %}
-                    <tr>
+                    <tr class="{% if not task.enabled %}task-inactive{% endif %}">
                         <td>{{ task.title }}</td>
-                        <td>{{ task.next_time }}</td>
+                        <td>{% if task.enabled %}{{ task.next_time }}{% else %}&mdash;{% endif %}</td>
                         <td>{{ task.recurring }}</td>
+                        <td>{% include 'partials/task_status.html' %}</td>
                         <td>
                             <a href="#edit-task-{{ task.id }}" class="modal-trigger"><i class="material-icons">edit</i></a>
                             <form action="/delete_task" method="POST" style="display:inline;">
@@ -30,6 +32,8 @@
                             </form>
                         </td>
                     </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="empty-state">No tasks yet. Add one below.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
