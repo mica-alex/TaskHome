@@ -69,9 +69,10 @@ Run from the repo root either way — data files resolve relative to CWD.
   unset and serve on 5000.
 - The scheduler thread starts on import, before the server binds.
 - The printer (Epson TM-T20III, USB `04b8:0e27`) may be absent; the app runs
-  fine and logs "Printer not connected, skipping print" — but note that due
-  tasks and fetched SCF issues that occur while the printer is unplugged are
-  **permanently dropped**, not queued (MASTER_PLAN `P0-4`).
+  fine and logs "Printer not connected, skipping print". Occurrences are no
+  longer lost: a task stays due and retries each tick, and an SCF issue is left
+  out of the seen set so the next overlapping window picks it up. A durable
+  queue that survives restarts is still MASTER_PLAN `P6-3`.
 - Do not run under a multi-worker WSGI server or with the Flask reloader as-is:
   each import starts another scheduler → duplicate prints (MASTER_PLAN `P0-12`).
 - macOS USB note: pyusb needs libusb (`brew install libusb`). No kernel-driver
@@ -104,15 +105,32 @@ variant), `tasks.json` (setup / check / force-rebuild / run),
 `settings.json` (interpreter path, Jinja2 associations for `templates/*.html`),
 and `extensions.json`.
 
+## Tests
+
+```sh
+.venv/bin/python -m pytest tests/ -q
+```
+
+Install dev dependencies first with `.venv/bin/pip install -r requirements-dev.txt`.
+
+The suite needs **no printer and no network**. `tests/conftest.py` sets
+`TASKHOME_NO_INIT=1` before importing `app`, so importing the module neither
+reads your real JSON files nor starts the scheduler thread; fixtures then
+substitute a fake printer and a fake HTTP layer. Nothing it does can emit paper
+or touch `tasks.json`.
+
+If you add a test that exercises persistence, point the file constants at
+`tmp_path` as `tests/test_persistence.py` does — never at the repo root.
+
 ## Logs
 
-- `app.logger` is set to DEBUG (`app.py:16`) with **no file handler configured**
+- `app.logger` is set to DEBUG with **no file handler configured**
   — output goes to the console. The `app.log` file in the repo root is
   vestigial (0 bytes, nothing writes it).
 - DEBUG logging includes **full dumps of tasks and history** on every
   `load_data()` — noisy and mildly sensitive (MASTER_PLAN `P1-5`).
-- One stray `print("Checking SCF listener...")` writes to stdout each poll
-  (`app.py:341`).
+- The stray `print("Checking SCF listener...")` that wrote to stdout each poll
+  is now a debug log call.
 
 ## Data files & recovery
 
@@ -120,9 +138,12 @@ and `extensions.json`.
 root, gitignored, and are the only persistent state. Schemas in
 [data-model.md](data-model.md).
 
-**Back them up** — there is no other copy, writes are non-atomic, and
-`load_data()` silently falls back to defaults when a file fails to parse
-(then the next save overwrites the corrupt-but-recoverable file with defaults).
+**Back them up** — there is still no second copy (MASTER_PLAN `P6-2`), though
+the two mechanisms that turned a small problem into a large one are fixed:
+writes are atomic (temp file + fsync + rename), and a store that fails to load
+is **write-blocked**, so a corrupt-but-repairable file is never overwritten with
+defaults. Watch for `Refusing to save` in the log — it means a file needs
+attention and that store is frozen until you fix it and restart.
 
 Recovering from a bad JSON file:
 
@@ -131,31 +152,32 @@ Recovering from a bad JSON file:
 2. Validate: `python3 -m json.tool tasks.json`. A truncated file usually fails
    at the very end — often repairable by closing brackets by hand.
 3. If unrepairable, restore from backup, or delete the file:
-   - `config.json` missing → in-code defaults are used, **but note** several
-     code paths require keys to exist once a file IS present
-     (see [data-model.md](data-model.md#configjson)); a deleted file is safer
-     than a partial one.
+   - `config.json` missing → in-code defaults are used. A *partial* file is
+     also safe now: `load_data()` merges it over the defaults rather than
+     replacing them.
    - `listeners.json` missing → recreated with defaults (listener disabled).
    - `tasks.json` / `history.json` missing → start empty.
 4. Restart and re-check `/settings` and `/listener` values.
 
 Sanity checks after any manual edit of `tasks.json`:
 
-- Every `next_time` parses with `datetime.fromisoformat` (a bad one poisons
-  every scheduler tick — `P0-6`).
-- No enabled one-off (`recurring: "none"`) task has `next_time` in the past
-  (hangs the scheduler at startup — `P0-1`).
-- Every `custom` task has a non-empty `days` list (`P0-2`).
+- Every `next_time` parses. A bad one no longer poisons the tick — the task is
+  disabled with `schedule_error` recorded — but it stops firing until fixed.
+- Every `custom` task has a non-empty `days` list. An empty one is now rejected
+  at ingress and disabled at runtime rather than hanging the scheduler.
+- A one-off with `next_time` in the past is handled by the catch-up policy on
+  next start; it no longer hangs anything.
 
 ## Known operational limits (honest posture)
 
 - Flask dev server on `0.0.0.0`, no auth/CSRF/TLS: acceptable only on a trusted
   home LAN. Do not port-forward it. Hardening options in MASTER_PLAN `X-1`.
-- UI requires internet (CDN assets) even though the app itself is LAN-local.
+- UI assets are vendored, so the interface works with no internet.
 - No service wrapper: run it in a terminal/tmux today. Planned: a committed
   `deploy/` directory with a systemd unit, udev rule for the printer
   (04b8:0e27 without root), launchd plist, and install scripts — specified in
   MASTER_PLAN `P6-1`. Also planned: state moves from the repo root into
   `data/` with an automatic startup migration (`P1-9`).
-- Restarting the app skips (does not print) any occurrences missed while down,
-  and — due to `P0-3` — may additionally skip tasks due in the next few hours.
+- Restarting applies the configured catch-up policy (default: skip recurring,
+  print one summary receipt for a missed one-off). The timezone bug that made
+  restarts additionally skip tasks due within the UTC offset is fixed.

@@ -1,9 +1,11 @@
 # Listeners
 
 A "listener" polls an external source and prints new items as receipts. Today
-there is exactly one — SeeClickFix (`scf`) — and it is **hardcoded** inside
-`scheduler_loop()` (`app.py:337-391`); `listeners.json` is a dict keyed by
-listener name to allow more, but nothing else is generic.
+there is exactly one — SeeClickFix (`scf`) — implemented in
+`poll_scf_listener()` and called from the scheduler loop. `listeners.json` is a
+dict keyed by listener name to allow more, but nothing else is generic: adding
+a second listener still means writing another bespoke function and another
+call. MASTER_PLAN `P5-1` introduces the plugin interface.
 
 ## SeeClickFix listener, end to end
 
@@ -19,73 +21,77 @@ request-type IDs are raw SCF category ids (e.g. 6632 = "Signal Repair",
 City of Manchester DPW); the UI stores and displays them as an opaque comma
 string with no name lookup (MASTER_PLAN Phase 4 redesigns this).
 
-### Poll cycle (every scheduler tick, gated by `interval`)
+### Poll cycle
 
-1. Skip unless `scf.enabled` and `request_types` is non-blank (`app.py:340`).
-2. Parse `last_check` with `dateutil.parser` (tolerant), assume UTC if naive
-   (`app.py:344-355`). Unparseable → treated as never-checked.
-3. Gate: poll only if `now_utc - last_check >= interval` minutes. Note
-   `now_utc` was captured at the **top of the tick** (`app.py:324`), before task
-   printing — so slow prints widen the effective window slightly.
-4. Build the request (`app.py:365-373`):
+`poll_scf_listener(now_utc)`, called once per scheduler tick:
+
+1. Skip unless `scf.enabled` and `request_types` is non-blank.
+2. Skip if inside a `backoff_until` window, or if `now_utc - last_check` is
+   less than `interval` minutes. An unparseable `last_check` is treated as
+   never-checked, so a corrupt watermark polls rather than stalling forever.
+3. **Take the watermark for the next poll before making any request.** This is
+   the fix for the window gap: the old code stamped `last_check` from a
+   timestamp captured at the top of the tick and wrote it after the fetch, so
+   anything created while the request was in flight fell between windows and
+   was never seen.
+4. Fetch every page:
 
    ```
    GET https://seeclickfix.com/api/v2/issues
        ?status=open,acknowledged
-       &request_types=<verbatim config string>
+       &request_types=<normalised comma string>
        &after=<last_check, or now-1h on first run>
-       &per_page=100
+       &per_page=100&page=N
    ```
 
-5. Print every returned issue in `created_at` ascending order
-   (`app.py:380-381`).
-6. Set `last_check = now_utc` (strict `%Y-%m-%dT%H:%M:%SZ`) and
-   `save_listeners()` (`app.py:384-385`).
+   Paging continues until `metadata.pagination.pages` is reached, or a short
+   page arrives if that metadata is missing, or the `SCF_MAX_PAGES` guard (20)
+   trips — which logs that it truncated rather than truncating silently.
+5. Drop issues whose id is already in `scf['seen']`, sort the rest by
+   `created_at` ascending, and print.
+6. Record ids of issues that **actually printed**, trim `seen` to the most
+   recent 2000, advance `last_check`, clear failure state, save.
 
-### `after`/`last_check` semantics — what actually happens
+### `after` / `last_check` semantics
 
 Verified against the live API and its docs (github.com/SeeClickFix/dev.seeclickfix.com):
 
-- `after` filters `created_at >= after` — **inclusive**. Combined with
-  `last_check` being stamped from the tick-start time (before the fetch), the
-  windows *overlap* rather than gap: an issue created at exactly `last_check`,
-  or between tick-start and the fetch, appears in two consecutive polls. Since
-  there is **no dedup by issue id**, that means a duplicate physical receipt
-  (MASTER_PLAN `P0-7`).
-- Issues that enter the feed late with an earlier `created_at` (moderation
-  holds; SCF timestamps are report-time) fall behind the advancing window and
-  are missed forever.
+- `after` filters `created_at >= after` — **inclusive** — so consecutive
+  windows deliberately overlap rather than risk a gap. Dedup by issue id is
+  what makes the overlap harmless; without it, an issue landing exactly on the
+  watermark reprinted every single cycle.
+- An issue that fails to print is **not** added to `seen`, so the next
+  overlapping window retries it. An offline printer delays SCF receipts instead
+  of destroying them.
+- Issues entering the feed late with an earlier `created_at` (moderation holds;
+  SCF timestamps are report-time) still fall behind the advancing window. This
+  is a genuine remaining limitation — see MASTER_PLAN `P4-4` for the
+  overlap-window proposal that addresses it.
 - The `status=open,acknowledged` filter means an issue opened and closed
   between polls is never printed.
-- If the fetch or the print loop throws, `last_check` is NOT advanced (it is set
-  after the loop, inside the same `try`) — good, the window is retried — but
-  individual print failures are swallowed *inside* `print_scf_issue`, so a
-  printer-offline poll still advances `last_check` and permanently drops every
-  issue in the window (MASTER_PLAN `P0-4`).
-
-### Pagination — silent loss above 100
-
-`per_page=100` is the API maximum; the response's `metadata.pagination`
-(`entries`, `page`, `pages`, `next_page`, `next_page_url`) is ignored
-(`app.py:376-377` even has a comment admitting the assumption). More than 100
-new issues in a window → only the first page (default sort `created_at DESC`,
-i.e. the **newest** 100) is processed; the oldest overflow issues are lost
-(MASTER_PLAN `P0-7`).
 
 ### Rate limits & errors
 
-The public API allows ~20 requests/minute. One poll = one request, so the
-current design is safely inside it, but there is no handling for 429/5xx beyond
-"log and retry next interval" (which is fine, because `last_check` doesn't
-advance on failure).
+The public API allows ~20 requests/minute. A poll is now one request *per page*,
+so a large backlog can burst; the page guard bounds it at 20.
+
+A failed fetch does **not** advance `last_check` — the window is retried rather
+than skipped. Consecutive failures back off exponentially
+(`2^n` minutes, capped at 60) via `backoff_until`, and the counter resets on
+success. `last_error` records the most recent failure.
 
 ### The `/listener` page
 
-GET renders the form from `listeners.get('scf', {})` (safe). POST rebuilds the
-dict wholesale and reads `listeners['scf'].get('last_check')` to preserve the
-watermark — a `KeyError` → HTTP 500 if the `scf` key is absent (hand-edited
-file), and `int(request.form.get('interval', 10))` → 500 on non-numeric/empty
-input (MASTER_PLAN `P0-9`).
+GET renders the form from `listeners.get('scf', {})`. POST validates: the
+interval must parse as an integer in 1–1440, and `request_types` is normalised
+(whitespace trimmed, empty entries dropped). The existing `last_check` is
+preserved via `listeners.get('scf') or {}` — indexing it directly raised
+`KeyError` → HTTP 500 on a fresh install before the listener had ever been
+configured.
+
+Note the form does not surface `seen`, `backoff_until`, `consecutive_failures`
+or `last_error`; they are runtime state, visible only in `listeners.json` and
+the log until MASTER_PLAN `P4-6` adds a feed view.
 
 ## SeeClickFix API reference (verified 2026-07)
 

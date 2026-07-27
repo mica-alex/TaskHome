@@ -5,10 +5,14 @@ receipts and SeeClickFix civic-issue receipts on a USB Epson TM-T20III thermal
 printer. Written so a new contributor (or agent) can be productive without
 reading `app.py` first.
 
-Everything here describes the **actual** behavior of the code as of commit
-`013b36d` ("Update buttons to be async"). Where behavior is surprising or
-arguably wrong, that is stated explicitly and cross-referenced to the
-improvement roadmap.
+Everything here describes the **actual** behavior of the code. Where behavior
+is surprising or arguably wrong, that is stated explicitly and cross-referenced
+to the improvement roadmap.
+
+**Status:** MASTER_PLAN Phase 0 (the bug catalogue) is complete — see the status
+table at the top of that phase for what landed and the two items deliberately
+left for Phase 1. These documents describe the post-fix behavior; the plan
+retains the original bug descriptions for the record.
 
 ## Contents
 
@@ -25,9 +29,11 @@ improvement roadmap.
 
 ## Ten-second orientation
 
-- One file: `app.py` (~544 lines). One background daemon thread (`scheduler_loop`)
-  started at import time. Four JSON files as the datastore (gitignored — they are
-  the user's live data).
+- One file: `app.py` (~1252 lines). One background daemon thread
+  (`scheduler_loop`) started at import time, suppressible with
+  `TASKHOME_NO_INIT=1`. Four JSON files as the datastore (gitignored — they
+  are the user's live data). A pytest suite that needs no printer and no
+  network.
 - Two things get printed: **tasks** (user-scheduled reminders) and **SCF issues**
   (new SeeClickFix reports matching configured request-type IDs).
 - The web UI (port 5000, bound to `0.0.0.0`, no auth) manages tasks, settings,

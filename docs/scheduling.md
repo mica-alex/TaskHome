@@ -1,92 +1,134 @@
 # Scheduling & Recurrence
 
-All logic lives in `calculate_next()` (`app.py:149-172`) and `scheduler_loop()`
-(`app.py:303-397`). Times are stored as **naive local ISO strings** in
-`task['next_time']`.
+Times are stored as **naive local ISO strings** in `task['next_time']`. That is
+the system's time model: task times mean wall-clock local time, always.
+
+The moving parts:
+
+| Function | Role |
+| --- | --- |
+| `calculate_next()` | One step of a recurrence. Pure; no side effects. |
+| `advance_schedule()` | Rolls a task past `now`, returning the occurrences stepped over. Enforces forward progress. |
+| `run_catchup()` | Startup pass over all tasks. |
+| `run_due_tasks()` | Steady-state pass, every 60s. |
+| `fire_due_task()` | Print one task and reschedule it. |
 
 ## Recurrence modes
 
-`calculate_next(next_time_str, recurring, days=None)` parses the string with
-`datetime.fromisoformat` and returns a new ISO string:
+`calculate_next(next_time_str, recurring, days=None)` returns the next
+occurrence as a naive local ISO string, or **the input unchanged** when it
+cannot advance.
 
 | `recurring` | Behavior | Notes |
 | --- | --- | --- |
 | `daily` | `+ timedelta(days=1)` | Wall-clock stable across DST (naive arithmetic) |
 | `weekly` | `+ timedelta(days=7)` | |
 | `monthly` | `+ relativedelta(months=1)` | dateutil clamps: Jan 31 → Feb 28/29 → **Mar 28/29 thereafter** (the original day-of-month is not remembered) |
-| `every_weekday` | advance one day at a time until `weekday() < 5` | Fri → Mon, correct |
-| `first_day_month` | `+ relativedelta(months=1, day=1)` | Always lands on the 1st of the next month, correct from any date |
-| `custom` | advance one day at a time until `weekday() in days` | `days` uses 0=Mon…6=Sun (matches the form checkboxes). **If `days` is empty or None the `while True` loop never terminates** — the scheduler thread hangs forever (MASTER_PLAN `P0-2`) |
-| `none` or anything else | **returns the input string unchanged** | This is the fall-through at `app.py:172` and the root cause of `P0-1` below |
+| `every_weekday` | step forward to the next `weekday() < 5`, bounded to 7 days | Fri → Mon |
+| `first_day_month` | `+ relativedelta(months=1, day=1)` | Always the 1st of the next month, correct from any date |
+| `custom` | step forward to the next `weekday() in days`, bounded to 7 days | `days` uses 0=Mon…6=Sun. Invalid entries are discarded; if nothing valid remains it returns the input unchanged and logs |
+| `none` or anything unrecognised | **returns the input unchanged** | Means "no next occurrence" |
+
+### The invariant that matters
+
+An unchanged return means *no next occurrence* and callers must never loop on
+it. `advance_schedule` enforces this rather than trusting callers:
+
+- unchanged return → `ScheduleError`
+- candidate not strictly later than the current value → `ScheduleError`
+- more than 4096 steps → `ScheduleError`
+
+This is deliberately general. The two hangs that motivated it (`P0-1`, a missed
+one-off; `P0-2`, a `custom` recurrence with no weekdays) were both instances of
+"the loop iterated without advancing", so the fix targets that property instead
+of the two symptoms — no future recurrence mode can reintroduce it.
+
+## Startup catch-up
+
+`run_catchup()` runs once, before the loop, comparing **naive local to naive
+local** — the same frame as the stored values and the steady-state loop.
+
+For each enabled task it rolls `next_time` forward past now and collects the
+occurrences it stepped over. What happens to those is the **catch-up policy**
+(MASTER_PLAN `P1-10`):
+
+| Policy | Behavior |
+| --- | --- |
+| `skip` | Print nothing; roll forward |
+| `print_once` | One receipt summarising the gap |
+| `print_all` | One receipt per missed occurrence, oldest first |
+| `print_if_recent` | Only those within `recent_window_hours` |
+
+Resolution order, first match wins: `task['catchup']` (unless `"inherit"`) →
+`catchup.oneoff_policy` for one-offs → `catchup.policy`.
+
+Defaults are `skip` globally and `print_once` for one-offs. The asymmetry is
+deliberate: skipping a recurring task loses one occurrence of many, while
+skipping a one-off means it **never prints at all**.
+
+Printing policies are capped at `catchup.max_prints` (default 20) and emit a
+final receipt naming how many were dropped — a silent truncation would
+misrepresent what happened.
+
+### Skipping is recorded, not silent
+
+A skipped occurrence sets `missed_count` and `last_missed_at` on the task. A
+missed one-off has no future occurrence, so leaving it enabled would make the
+steady-state loop fire it seconds later, contradicting the policy — it is
+marked `missed: true` and disabled, and the UI shows it as *Missed*, distinct
+from *user-disabled*.
+
+A task whose recurrence cannot advance, or whose `next_time` will not parse, is
+disabled with the reason in `schedule_error` rather than retried every tick
+forever.
 
 ## Steady-state firing (every 60s)
 
-For each enabled task: `datetime.fromisoformat(next_time) <= datetime.now()`
-(both naive local) → print, then:
+`run_due_tasks(now)` compares `next_time <= now`, both naive local, then:
 
-- `recurring == 'none'` → task removed from `tasks`.
-- otherwise → `next_time = calculate_next(...)`. Note this advances **from the
-  scheduled time**, not from now — so a task due 21:00 that fires at 21:00:40
-  next fires exactly 24h after 21:00. Good.
+1. Print. **If the print fails, nothing else happens** — `next_time` is left
+   alone so the occurrence is retried next tick, and `print_failures` /
+   `last_print_failure` are recorded. An unplugged printer therefore delays
+   receipts rather than destroying them.
+2. On success, advance from the *scheduled* time, not from now — a task due
+   21:00 that fires at 21:00:40 next fires exactly 24h after 21:00.
+3. One-off tasks are removed after a successful print.
+4. If further occurrences elapsed during an outage, the catch-up policy governs
+   them, so recovery doesn't dump a stack of paper by default.
 
-Two caveats:
+Each task is isolated in its own `try`. One unusable task cannot abort the pass
+or the listener poll.
 
-1. The print result is ignored — if the printer is disconnected `print_task`
-   returns without printing, but the schedule still advances / the one-off task
-   is still deleted. The occurrence is silently lost (MASTER_PLAN `P0-4`).
-2. The whole task pass + SCF check shares one `try/except` (`app.py:322-393`).
-   One task with an unparseable `next_time` throws at `app.py:328` and aborts
-   the remainder of the tick, every tick (MASTER_PLAN `P0-6`).
-
-## Startup catch-up (runs once, before the loop)
-
-`app.py:304-318`. Intent: after downtime, fast-forward each task's `next_time`
-past "now" so stale occurrences don't all fire at once. Actual semantics:
-
-- **Missed occurrences are skipped, not printed.** If the machine was off at
-  21:00, the 21:00 task simply doesn't print that day. This is hardcoded and
-  unconfigurable today; MASTER_PLAN `P1-10` makes it a setting (global default
-  plus per-task override, with `skip` / `print_once` / `print_all` /
-  `print_if_recent`), and the miss becomes visible in the UI rather than
-  silent. Note that a missed **one-off** task doesn't just skip a day — it
-  never prints at all.
-- The comparison is done in a pseudo-UTC frame: the naive local `next_time` is
-  force-tagged UTC (`.replace(tzinfo=timezone.utc)`, `app.py:311`) and compared
-  to real UTC now. For a local zone at UTC-5, local `12:00` is treated as
-  `12:00Z` = `07:00` local — i.e. the catch-up believes tasks are due **5 hours
-  earlier than they are**. Consequence: any restart silently skips a full day of
-  every task whose `next_time` falls within the next |UTC-offset| hours
-  (MASTER_PLAN `P0-3`). The steady-state loop, by contrast, compares naive-local
-  to naive-local and is internally consistent.
-- **Hang #1:** a one-off (`recurring: "none"`) task whose `next_time` is in the
-  past never advances (`calculate_next` returns it unchanged), so
-  `while next_time < now` spins forever at 100% CPU and the scheduler thread
-  never reaches its main loop — nothing ever prints again until the process is
-  restarted with the task fixed (MASTER_PLAN `P0-1`). This happens any time the
-  app restarts after a one-off task's time passed unprinted.
-- **Hang #2:** `custom` with empty `days` — same infinite loop, inside
-  `calculate_next` itself (`P0-2`). This one can also fire in steady state, the
-  moment such a task comes due.
-- The per-task `try/except` (`app.py:309-317`) does NOT protect against either
-  hang — infinite loops are not exceptions.
-
-## Timezone summary (the honest version)
+## Timezone summary
 
 | Value | Frame |
 | --- | --- |
-| `task.next_time` | Naive local (from `<input>` / flatpickr, or `datetime.now().isoformat()`) |
-| Steady-state comparison | Naive local vs naive local — consistent |
-| Startup catch-up comparison | Naive local **reinterpreted as UTC** vs real UTC — wrong by the UTC offset |
+| `task.next_time` | Naive local |
+| Startup catch-up comparison | Naive local vs naive local |
+| Steady-state comparison | Naive local vs naive local |
 | Task `print_time` (history) | Naive local |
-| SCF `last_check` / `after` | Real UTC (`...Z`) — handled correctly with dateutil parsing (`app.py:347-352`) |
+| SCF `last_check` / `after` | Real UTC (`...Z`) |
 | SCF `reported_at` (history) | Verbatim API value (offset-aware, e.g. `-04:00`) |
 
-DST: naive day-stepping keeps wall-clock times stable across DST transitions
-(a 21:00 task stays 21:00), which is the desirable behavior for reminders.
-A `next_time` falling inside the spring-forward gap is compared naively and
-fires at the next tick after the (nonexistent) time — acceptable.
+Task times and listener watermarks are genuinely different kinds of value — one
+is wall-clock, the other an instant — so they use different frames on purpose.
+`parse_task_time()` normalises any stray timezone-aware value to local naive, so
+comparisons never mix frames.
 
-Fix direction (see MASTER_PLAN `P0-3`/`P1-2`): pick one frame. Recommended:
-keep naive local for task wall-clock semantics, and make the catch-up loop use
-`datetime.now()` (naive local) instead of UTC — a two-line change — plus a
-guard that `calculate_next` made progress.
+DST: naive day-stepping keeps wall-clock times stable across transitions (a
+21:00 task stays 21:00), which is the desirable behavior for reminders. A
+`next_time` inside the spring-forward gap fires at the next tick after the
+nonexistent time.
+
+## Input canonicalisation
+
+`next_time` submitted through a form is parsed and re-serialised, so the stored
+value is canonical regardless of what the browser sent. Previously `':00'` was
+appended blindly, producing `'...T21:00:00:00'` when the browser already
+included seconds.
+
+Worth knowing: on Python 3.11+ `datetime.fromisoformat` *accepts* that
+malformed value, silently dropping the trailing `:00`. On 3.9 it raised. Since
+`D-3` moved this project to 3.13, that input is a silent-acceptance bug rather
+than the denial-of-service originally catalogued as `P0-6`; validation at
+ingress is the real defence. `tests/test_recurrence.py` pins the behavior.

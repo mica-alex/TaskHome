@@ -18,108 +18,98 @@ routes, which return raw HTML strings). Form field access uses
 | `/delete_task` | POST | redirect → `/task_page` |
 | `/listener` | GET, POST | `listener.html` / redirect |
 
-## `GET /` — `index()` (`app.py:400-405`)
+## `GET /` — `index()`
 
 Probes the printer (`is_printer_connected()` — one `usb.core.find` per page
-load), passes `status`, `config`, enabled tasks, and `history[:5]` to
-`index.html`. The history table header says "Last 5 Prints" and matches.
+load), passes `status`, `config`, **all** tasks, and `history[:5]` to
+`index.html`.
 
-## `GET /task_page` — `task_page()` (`app.py:408-411`)
+## `GET /task_page` — `task_page()`
 
-Enabled tasks + the **entire** history list, unpaginated (`tasks.html` renders
-every record; MASTER_PLAN `P2-1`). Note disabled tasks are invisible here too —
-there is no UI to re-enable a disabled task except editing... which is also
-impossible since edit modals only render for visible tasks. Disabling a task
-via its edit modal makes it unreachable from the UI (MASTER_PLAN `P0-13`).
+All tasks + the **entire** history list, unpaginated (`tasks.html` renders
+every record; MASTER_PLAN `P2-1` fixes this).
 
-## `/settings` — `settings()` (`app.py:414-435`)
+Both pages render disabled tasks rather than filtering them out, with a status
+badge distinguishing *Missed*, *Error* and *Disabled*. Hiding them previously
+made a disabled task unreachable from the UI — including one the scheduler had
+disabled itself — so there was no way to re-enable it (`P0-13`).
 
-- GET: renders config form + printer info block
-  (manufacturer/model/connection constants + live status probe).
-- POST with `clear_history` present (the "Clear History" submit button):
-  empties history, saves, redirects. **No confirmation step.** Other form
-  values in the same submission are ignored.
-- POST otherwise: `config['max_history'] = int(request.form['max_history'])`
-  (ValueError/KeyError → 500; values ≤ 0 pass the server untouched — the form's
-  `min="1"` is client-side only — and break history truncation),
-  `hostname` and `theme` stored verbatim, config saved, history truncated and
-  saved, redirect.
+## `/settings` — `settings()`
 
-## `POST /test_print` — `test_print()` (`app.py:438-457`)
+- GET: renders config form + printer info block (constants + live status probe).
+- POST with `clear_history`: empties history, saves, redirects. The button
+  confirms client-side first. Other form values in that submission are ignored.
+- POST otherwise: validates `max_history` (integer, 0–100000) and `theme`
+  (one of `system`/`light`/`dark`); a blank `hostname` falls back to the
+  default. Invalid input returns **400** with `error.html` rather than a 500.
 
-Builds a hardcoded sample task and calls `print_task()` — real paper, real
-history record. Returns `'Test print successful! <a href="/settings">Back</a>'`
-etc. as a bare string. Because `print_task` swallows its own exceptions, the
-"successful" branch is returned even when printing failed; the only honest
-failure is the up-front `is_printer_connected()` check
-(MASTER_PLAN `P0-10`). `settings.html` calls this via `fetch()` and decides
-which toast to show by `txt.includes('successful')`.
+## `POST /test_print`, `POST /test_scf_print`
 
-## `POST /test_scf_print` — `test_scf_print()` (`app.py:460-485`)
+Build a hardcoded sample payload and call the real print function — **real
+paper, real history record**.
 
-Same pattern with a hardcoded SCF issue (`media.image_full: null`, exercising
-the "Has Media: No" path). Same misleading-success caveat.
+Status codes are honest: `200` on success, `500` when the print failed, `503`
+when the printer is absent. `settings.html` decides its toast from `resp.ok`,
+having previously matched the body against the substring `"successful"` — which
+reported success unconditionally, since the print functions swallow their own
+exceptions (`P0-10`). Buttons disable in flight so a double click cannot emit
+two receipts.
 
-## `POST /add_task` — `add_task()` (`app.py:488-505`)
+## `POST /add_task`, `POST /edit_task/<id>`
 
-Consumes: `title` (required — KeyError → 500 if absent), `next_time`,
-`recurring`, `enabled` (checkbox presence), `extra`, `url`, `days` (multi,
-only kept when `recurring == 'custom'`).
+Both build the task through `task_from_form()`, which validates and raises
+`ValidationError` (→ 400 + `error.html`) rather than letting bad input reach the
+datastore:
 
-- `next_time` handling: `request.form['next_time'] + ':00'` when non-empty
-  (flatpickr submits `Y-m-d H:i`, so this appends seconds), else
-  `datetime.now().isoformat()`. No server-side validation that the result
-  parses — garbage in the field becomes a stored `next_time` that poisons the
-  scheduler tick (MASTER_PLAN `P0-6`).
-- `days`: `[int(d) for d in request.form.getlist('days')]` — non-numeric →
-  500; **empty list accepted** for `custom` → infinite loop when due
-  (MASTER_PLAN `P0-2`).
+| Field | Rule |
+| --- | --- |
+| `title` | Required, non-blank after stripping |
+| `recurring` | Must be one of the seven known modes |
+| `next_time` | Parsed and re-serialised; unparseable is rejected. Empty → now (add) or unchanged (edit) |
+| `days` | Integers 0–6, deduped and sorted. **Required and non-empty** when `recurring == 'custom'`, since an empty list yields a schedule that can never advance (`P0-2`) |
+| `enabled` | Checkbox presence |
+| `extra`, `url` | Optional; blank removes the key |
 
-## `/edit_task/<task_id>` — `edit_task()` (`app.py:508-533`)
+Edits validate against a **copy**, and the live task is only replaced once
+everything passes — a rejected edit leaves it untouched instead of
+half-applied. A successful edit also clears `schedule_error` and `missed`,
+since the user has just restated what the schedule should be.
 
-- GET: renders `tasks.html` with `edit_task` context (note: the template never
-  uses `edit_task` — editing actually happens through the per-task modals
-  rendered on `/task_page`; this GET branch is effectively dead code).
-- POST: same fields as add. Two extra hazards:
-  - The edit modal pre-fills `next_time` with the stored ISO value
-    (`2025-08-26T21:00:00`). flatpickr normally rewrites it to `Y-m-d H:i` on
-    init; if flatpickr fails to load (CDN offline), submitting appends `:00`
-    to the raw ISO → `2025-08-26T21:00:00:00`, unparseable → scheduler tick
-    poisoned (MASTER_PLAN `P0-6`).
-  - Absent/empty `extra`/`url` **delete** those fields (differs from add, which
-    just omits them). Empty `next_time` keeps the old value.
+`GET /edit_task/<id>` renders `tasks.html` with an `edit_task` context that the
+template never uses — editing happens through the per-task modals on
+`/task_page`. This branch is effectively dead code.
 
-## `POST /delete_task` — `delete_task()` (`app.py:536-542`)
+## `POST /delete_task`
 
-Consumes `id` (`request.form['id']` — 500 if absent). Rebinds the global
-`tasks` list (filter-out); no confirmation, no undo (history is unaffected).
+Consumes `id`. Missing id → 400; unknown id → 404. Mutates the task list in
+place rather than rebinding the global. No confirmation, no undo (history is
+unaffected).
 
-## `/listener` — `listener()` (`app.py:546-557`)
+## `/listener` — `listener()`
 
-- GET: renders form from `listeners.get('scf', {})` — safe when key missing.
-- POST: rebuilds `listeners['scf']` from the form; hazards:
-  `listeners['scf'].get('last_check')` → **KeyError/500 when the `scf` key is
-  absent** from a hand-edited `listeners.json`, and
-  `int(request.form.get('interval', 10))` → 500 on empty/non-numeric input
-  (MASTER_PLAN `P0-9`). `request_types` is stored verbatim with no validation.
+- GET: renders the form from `listeners.get('scf', {})`.
+- POST: validates `interval` (integer, 1–1440) and normalises `request_types`
+  (trims whitespace, drops empty entries). Preserves the existing `last_check`
+  via `listeners.get('scf') or {}` — indexing it directly raised `KeyError` →
+  500 on a fresh install (`P0-9`).
+
+## Error responses
+
+Validation failures render `error.html` with a message and a back link, at the
+appropriate 4xx status. This is deliberately plain: the submitted values are
+lost on the way there, which is why MASTER_PLAN `P2-4` replaces it with inline
+field errors and toasts once the `/api/` layer exists.
 
 ## Template/front-end notes
 
-- Jinja autoescaping is on (Flask default) — user-entered titles etc. are XSS-safe.
-- `base.html` pulls Materialize, Material Icons, and flatpickr from CDNs; with
-  no internet the selects are invisible (`styles.css` hides native selects) and
-  the datetime picker (and the `+ ':00'` normalization it provides) is gone
-  (MASTER_PLAN `P0-15`).
-- Theme: `data-theme="system"` is resolved to `dark`/`light` client-side on
-  load; because the attribute is overwritten, the `matchMedia` change listener
-  never re-fires meaningfully — OS theme flips mid-session are ignored until
-  reload (MASTER_PLAN `P2-8`).
-- Edit-modal bug: the recurring-select change handler looks for
-  `[id^="custom-days"]` but edit modals use ids `custom_days_<uuid>`
-  (underscore) — choosing "Custom" in an edit modal throws a TypeError and
-  never reveals the weekday checkboxes (`tasks.html:186`, MASTER_PLAN `P0-14`).
-- History listing quirk: for SCF rows both `index.html:55` and `tasks.html:54`
-  render `SCF: {{ item.category }} - {{ item.id }}` when `item.summary` exists —
-  the id is shown where the summary was presumably intended (MASTER_PLAN `P2-10`).
-- The test-print buttons don't disable while a request is in flight —
-  double-click = double paper.
+- Jinja autoescaping is on (Flask default) — user-entered titles are XSS-safe,
+  and `tests/test_routes.py` asserts it.
+- All front-end assets are **vendored** under `static/vendor/`; no page makes an
+  external request, so the UI works with no internet (`P0-15`).
+- Theme: the user's setting lives in `data-theme-mode` and the resolved theme in
+  `data-theme`, so OS light/dark flips are followed for the whole session. The
+  script runs in `<head>` before first paint, avoiding a flash of the wrong
+  theme (`P0-16`).
+- History listing quirk: for SCF rows both `index.html` and `tasks.html` render
+  `SCF: {{ item.category }} - {{ item.id }}` when `item.summary` exists — the id
+  appears where the summary was presumably intended (MASTER_PLAN `P2-10`).

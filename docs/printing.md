@@ -15,16 +15,33 @@ attempt to set `media_width_mm = 80` explicitly.
 
 ## Connection lifecycle
 
-- `is_printer_connected()` (`app.py:140-146`) is a pure presence probe:
+- `is_printer_connected()` is a pure presence probe:
   `usb.core.find(idVendor, idProduct) is not None`. It does not open the device.
-- Each print call then constructs a **fresh** `Usb(VID, PID, profile='TM-T20II')`
-  handle. There is a TOCTOU window between probe and open, and — more
-  importantly — `p.close()` is only reached on the success path. Any exception
-  after the open (bad payload field, USB hiccup) is caught by the outer
-  `except`, logged, and the handle **leaks**; the partially-printed receipt is
-  left uncut in the printer (MASTER_PLAN `P0-11`).
-- If the probe fails, print functions log a warning and return — the caller does
-  not know, and the scheduler advances the schedule anyway (MASTER_PLAN `P0-4`).
+- Each print goes through the `open_printer()` context manager, which
+  constructs a fresh `Usb(VID, PID, profile='TM-T20II')` and **always** closes
+  it, success or failure. Previously `close()` sat on the success path only, so
+  any mid-receipt exception leaked the claimed interface — enough of those and
+  the device stops opening until it is physically replugged (`P0-11`).
+  An error raised while closing is logged but never masks the original error.
+- A TOCTOU window remains between probe and open: the printer can vanish in
+  between. That is handled by treating the print as failed rather than by
+  trying to eliminate the race.
+
+### Print functions return whether paper came out
+
+`print_task()` and `print_scf_issue()` both return `True` only if a receipt was
+genuinely produced, and `False` otherwise — disconnected printer, USB error,
+malformed payload. This return value is load-bearing in three places:
+
+- the scheduler advances a task's schedule **only** on `True` (`P0-4`);
+- the SCF listener marks an issue as seen only on `True`, so an unprinted issue
+  is retried next cycle;
+- the test-print routes report the real outcome instead of always claiming
+  success (`P0-10`).
+
+History is written only after a receipt is out and the handle is closed.
+History is the record of paper that exists — reprint-from-history depends on
+that being true.
 
 ## `p.set(...)` cheat sheet
 
@@ -84,29 +101,36 @@ comments in `app.py` saying "italic" are aspirational; no italics are ever set
         [ cut ]
 ```
 
-Payload-shape hazards (verified against the live API):
+Payload handling:
 
-- `issue['html_url']` (`app.py:238`) and `issue['media']['image_full']`
-  (`app.py:258`) are indexed without guards. The live API today always includes
-  both (`media` is an object whose `image_full` may be null), but a missing
-  `media.image_full` key or `media: null` would raise mid-print — after the QR
-  and title are already on paper — leaving an uncut partial receipt and no
-  history record, while `last_check` still advances so the issue is never
-  retried (MASTER_PLAN `P0-8`).
-- `reported_at` parsing handles both `Z` and offset forms via
-  `.replace('Z', '+00:00')` + `fromisoformat` — but then **formats the time in
-  the issue's own offset**, not local time (live API returns the place's local
-  offset, so in practice this reads correctly for nearby places).
+- **Every field is resolved before the printer is opened.** `html_url`,
+  `media.image_full`, `request_type.title` and `created_at` were previously
+  indexed inline, so an unexpected shape raised *after* the QR and title were
+  already on paper — an uncut partial receipt, no history record, and (before
+  `P0-7`) a watermark that advanced anyway so the issue was never retried.
+  Resolving first means a malformed payload fails having printed nothing.
+  Helpers: `scf_category()`, `scf_has_media()`, `scf_reported_at()`.
+- Tolerated shapes: `media` absent, null, or not a dict; `request_type` absent,
+  null, or missing `title` (→ `"Unknown Category"`); `created_at` absent or
+  unparseable (→ the raw value, or `"Unknown"`); `html_url` absent (the QR is
+  simply omitted).
+- `reported_at` is formatted in **the issue's own offset**, not local time. The
+  live API returns the place's local offset, so this reads correctly for nearby
+  places.
 - The history record is a projection, not the raw issue — see
   [data-model.md](data-model.md#type-scf--a-printed-seeclickfix-issue).
 
 ## Test prints
 
-`/test_print` and `/test_scf_print` (`app.py:438-485`) build hardcoded sample
-payloads and run the same print functions — so **they emit real paper and real
-history records**. Their success responses are misleading: `print_task` /
-`print_scf_issue` swallow their own exceptions, so the routes report
-"successful" even when the print failed (MASTER_PLAN `P0-10`).
+`/test_print` and `/test_scf_print` build hardcoded sample payloads and run the
+same print functions — so **they emit real paper and real history records**.
+
+They report the real outcome: `200` on success, `500` when the print failed,
+`503` when the printer is absent. The front end trusts the status code. It used
+to match the response body against the substring `"successful"`, which reported
+success unconditionally because the print functions swallowed their own
+exceptions (`P0-10`). The buttons also disable while a request is in flight, so
+a double click cannot emit two receipts.
 
 ## Rules for agents
 
