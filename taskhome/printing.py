@@ -133,8 +133,6 @@ def print_task(task):
     for a print that never happened (P0-4), and the test-print routes must not
     claim success when the print failed (P0-10).
     """
-    from . import queue
-
     try:
         blocks = task_blocks(task)
     except Exception as e:
@@ -148,10 +146,17 @@ def print_task(task):
         record_history(history)
         return True
 
-    # Queued rather than lost. The in-memory retry from P0-4 does not survive a
-    # restart, and for a SeeClickFix issue the window has already moved on.
-    queue.enqueue('task', blocks, description=task.get('title', 'Task'),
-                  history=history)
+    # Deliberately NOT queued, unlike an SCF or NWS receipt.
+    #
+    # A task already has a durable retry: the scheduler leaves next_time alone
+    # on failure (P0-4) and save_tasks() persists that, so the occurrence is
+    # still due after a restart. Queueing as well would give it two retry
+    # mechanisms, and when the printer came back both would fire -- the queue
+    # would drain the receipt and the still-due task would print it again.
+    #
+    # The queue exists for items with nowhere else to live: a listener's
+    # polling window has already moved past an issue by the time the print
+    # fails, so without the queue it is simply gone.
     return False
 
 

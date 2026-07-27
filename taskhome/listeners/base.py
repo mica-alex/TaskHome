@@ -76,6 +76,20 @@ class Listener:
         """Placeholder values for the receipt template."""
         raise NotImplementedError
 
+    def should_print(self, config, item, now=None):
+        """Whether this item should print now. Returns (bool, reason).
+
+        The reason is logged, so "why did that not print" is answerable from
+        the log rather than by reading the config.
+
+        Overriding this is how a listener expresses per-item policy -- P5-3's
+        per-event-type matrix and quiet hours are both implemented here. The
+        runtime calls it for every fresh item; a listener that filters inside
+        poll() instead would have its decisions invisible to the log and
+        untestable apart from the network.
+        """
+        return True, ''
+
     def sort_key(self, item):
         """Oldest first, so a backlog prints in the order it happened."""
         return item.get('created_at') or ''
@@ -365,6 +379,22 @@ def run(listener, now_utc, printer=None):
 
     printed = 0
     for item in fresh:
+        # Filtering happens here rather than in poll() so that a suppressed
+        # item is still marked seen -- otherwise it would be re-fetched and
+        # re-evaluated on every single poll, forever.
+        try:
+            wanted, reason = listener.should_print(config, item)
+        except Exception as e:
+            # A broken filter must not silence the listener entirely; failing
+            # open prints something unexpected, failing closed prints nothing
+            # and looks identical to "no alerts".
+            log.error(f"{listener.title}: filter failed, printing anyway: {e}")
+            wanted, reason = True, ''
+        if not wanted:
+            log.info(f"{listener.title}: skipping {listener.describe(item)} -- {reason}")
+            seen.append(listener.dedup_key(item))
+            continue
+
         blocks = (styles.fill(template, listener.context(item)) if template
                   else listener.receipt_blocks(item))
         if printing.print_blocks(blocks):

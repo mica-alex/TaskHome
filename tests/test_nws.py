@@ -207,3 +207,56 @@ def test_context_fills_every_declared_placeholder():
     context = nws.listener.context(alert())
     missing = set(nws.NWSListener.PLACEHOLDERS) - set(context)
     assert not missing, f'context is missing {missing}'
+
+
+# --- the runtime must actually apply the filter --------------------------------
+#
+# Every filtering test above exercises should_print() directly. That is exactly
+# how the filter came to be wired to nothing at all: the unit tests passed while
+# base.run() printed every fetched alert, so a configured "wind advisories never"
+# still printed. These go through run().
+
+def run_with(monkeypatch, store, alerts, **config):
+    """Run the real listener runtime over a fixed set of alerts."""
+    from taskhome import printing, storage as storage_module
+    from taskhome.listeners import base
+
+    printed = []
+    monkeypatch.setattr(printing, 'print_blocks', lambda blocks: printed.append(blocks) or True)
+    monkeypatch.setattr(printing, 'record_history', lambda record: None)
+    monkeypatch.setattr(storage_module, 'save_listeners', lambda: True)
+    monkeypatch.setattr(nws.NWSListener, 'poll', lambda self, c, since: alerts)
+
+    state.listeners['nws'] = dict({'enabled': True, 'interval': 1}, **config)
+    from datetime import datetime, timezone
+    base.run(nws.listener, datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc))
+    return printed
+
+
+def test_a_switched_off_event_does_not_reach_the_printer(store, monkeypatch):
+    printed = run_with(monkeypatch, store, [alert('Wind Advisory')],
+                       events={'Wind Advisory': {'enabled': False}})
+    assert printed == [], 'a disabled event type still printed'
+
+
+def test_an_enabled_event_does_reach_the_printer(store, monkeypatch):
+    printed = run_with(monkeypatch, store, [alert('Wind Advisory')],
+                       events={'Wind Advisory': {'enabled': True}})
+    assert len(printed) == 1
+
+
+def test_a_suppressed_alert_is_still_marked_seen(store, monkeypatch):
+    """Otherwise it is re-fetched and re-evaluated on every poll forever, and
+    the log fills with the same skip line every two minutes."""
+    run_with(monkeypatch, store, [alert('Wind Advisory')],
+             events={'Wind Advisory': {'enabled': False}})
+    assert nws.listener.dedup_key(alert('Wind Advisory')) in state.listeners['nws']['seen']
+
+
+def test_a_broken_filter_fails_open(store, monkeypatch):
+    """Failing closed prints nothing and looks exactly like "no alerts", which
+    is the one failure mode a weather alerter must not have."""
+    monkeypatch.setattr(nws.NWSListener, 'should_print',
+                        lambda self, c, i, now=None: 1 / 0)
+    printed = run_with(monkeypatch, store, [alert('Tornado Warning', 'Extreme')])
+    assert len(printed) == 1

@@ -166,13 +166,19 @@ def test_a_job_not_yet_due_is_skipped(store):
 
 # --- integration with the print path ------------------------------------------
 
-def test_offline_task_print_is_queued(store, monkeypatch):
+def test_offline_task_print_is_not_queued(store, monkeypatch):
+    """This test asserted the opposite until it was found to encode a bug.
+
+    A task already retries durably -- the scheduler leaves next_time alone on
+    failure (P0-4) and persists it -- so queueing the receipt as well gave the
+    occurrence two retry mechanisms. When the printer came back, the queue
+    drained the receipt and the still-due task printed a second copy.
+    """
     monkeypatch.setattr(printing, 'is_printer_connected', lambda: False)
     task = {'id': 'x', 'title': 'Take Medicine', 'recurring': 'daily',
             'next_time': '2026-03-01T09:00:00', 'enabled': True}
     assert printing.print_task(task) is False
-    jobs = queue.load_queue()
-    assert len(jobs) == 1 and jobs[0]['description'] == 'Take Medicine'
+    assert queue.load_queue() == []
 
 
 def test_offline_scf_print_is_queued(store, monkeypatch):
@@ -220,3 +226,29 @@ def test_discard_removes_one_or_all(store):
 def test_corrupt_queue_file_does_not_crash(store):
     (store / 'queue.json').write_text('{not json')
     assert queue.load_queue() == []
+
+
+def test_a_failed_task_print_is_not_queued(tmp_path, monkeypatch):
+    """A task has a durable retry already -- the scheduler leaves next_time
+    alone and saves it (P0-4). Queueing as well gave it two retry mechanisms,
+    and when the printer came back the queue drained the receipt AND the
+    still-due task printed it again.
+    """
+    from taskhome import constants, printing, queue
+    monkeypatch.setattr(constants, 'DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(printing, 'print_blocks', lambda blocks: False)
+
+    assert printing.print_task({'id': 'a', 'title': 'Bins', 'recurring': 'none'}) is False
+    assert queue.load_queue() == [], 'a task print was queued as well as left due'
+
+
+def test_a_failed_scf_print_is_queued(tmp_path, monkeypatch):
+    """The counterpart. A listener's polling window has already moved past the
+    issue, so without the queue the receipt is simply gone."""
+    from taskhome import constants, printing, queue
+    monkeypatch.setattr(constants, 'DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(printing, 'print_blocks', lambda blocks: False)
+
+    printing.print_scf_issue({'id': 7, 'address': 'Elm St', 'status': 'Open',
+                              'request_type': {'title': 'Pothole'}})
+    assert len(queue.load_queue()) == 1
