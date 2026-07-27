@@ -42,10 +42,18 @@ def task_receipt(task, qr_url, when=None):
       none of it needs to be large.
     * The task id is shortened. It exists for cross-reference; the full value
       is already encoded in the QR.
+    * Line spacing is computed per block rather than left at the printer
+      default, which was shorter than a double-height character cell and so
+      printed the following line into the title's descenders. A small gap
+      under the title supplies the visual separation on top of that.
     """
     blocks = [r.qr(qr_url, size=4)]
     blocks.append(r.text(task.get('title', ''), font='a', width=2, height=2,
                          bold=True))
+    # A partial line under the title. The per-block leading already stops the
+    # next line printing into the descenders; this is the visual separation
+    # that makes the title read as a heading rather than as run-on text.
+    blocks.append(r.gap(6))
     extra = task.get('extra')
     if extra:
         blocks.append(r.text(extra, font='a', width=1, height=1))
@@ -93,6 +101,7 @@ def scf_receipt(issue, category, address, reported_at, status, has_media,
     """
     blocks = [r.qr(issue.get('html_url') or '', size=4)]
     blocks.append(r.text(category, font='a', width=2, height=2, bold=True))
+    blocks.append(r.gap(6))
     blocks.append(r.text(address, font='b', width=1, height=1))
 
     facts = f'{status}  -  {reported_at}'

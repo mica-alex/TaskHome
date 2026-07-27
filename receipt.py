@@ -27,6 +27,23 @@ FONTS = {
 }
 DOTS_PER_MM = 8
 
+# Printer resolution, and the units the ESC 3 line-spacing command uses.
+DPI = 203
+SPACING_DIVISOR = 180          # ESC 3 n sets n/180 inch; the widely supported one
+
+# Extra vertical space below a line, on top of the character cell height.
+# The printer's factory default line feed is about 34 dots, which is FINE for
+# single-height text but shorter than a double-height character cell (48 dots)
+# -- so a 2x title had the following line printed into its descenders. Spacing
+# is therefore computed per block from the actual cell height rather than left
+# at the default.
+LEADING_DOTS = 6
+
+# Feed used around a QR image. The symbol itself already carries a 1-module
+# quiet zone (python-escpos builds it with border=1), so the visible gap was
+# the trailing line feed inheriting whatever spacing was current.
+QR_LEADING_DOTS = 4
+
 # Preview frame width: the paper expressed in font b cells, which is the
 # narrowest cell and so the finest grid available. Font a is scaled onto it.
 PAGE_COLUMNS = FONTS['b']['cols']
@@ -55,6 +72,11 @@ def rule(char='-', font='b'):
 
 def blank(count=1):
     return {'type': 'blank', 'count': count}
+
+
+def gap(dots=8):
+    """A sub-line vertical space, for when a full blank line is too much."""
+    return {'type': 'gap', 'dots': dots}
 
 
 # --- helpers ------------------------------------------------------------------
@@ -122,22 +144,27 @@ def qr_modules(value):
 # --- height estimation --------------------------------------------------------
 
 def block_height(block):
-    """Estimated height in printer dots."""
+    """Estimated height in printer dots, including per-line leading.
+
+    Leading is part of the height because the renderer sets line spacing per
+    block; ignoring it would make the estimate systematically low and the
+    preview's millimetre figure useless for comparing layouts.
+    """
     kind = block['type']
     if kind == 'blank':
-        return FONTS['b']['cell_h'] * block.get('count', 1)
+        return (FONTS['b']['cell_h'] + LEADING_DOTS) * block.get('count', 1)
+    if kind == 'gap':
+        return block.get('dots', 8)
     if kind == 'qr':
-        # Plus the quiet zone python-escpos emits around the symbol.
-        return (qr_modules(block['value']) + 8) * block.get('size', 4)
+        # The symbol carries a 1-module quiet zone, plus the trailing feed.
+        return (qr_modules(block['value']) + 2) * block.get('size', 4) + QR_LEADING_DOTS
     if kind == 'barcode':
         return block.get('height', 60) + FONTS['b']['cell_h']  # symbol + label
     if kind == 'rule':
-        return FONTS[block.get('font', 'b')]['cell_h']
+        return line_dots(block)
     if kind == 'text':
-        font = FONTS.get(block.get('font', 'b'), FONTS['b'])
         cols = columns_for(block.get('font', 'b'), block.get('width', 1))
-        lines = len(wrap(block['value'], cols))
-        return lines * font['cell_h'] * max(int(block.get('height', 1)), 1)
+        return len(wrap(block['value'], cols)) * line_dots(block)
     return 0
 
 
@@ -151,32 +178,62 @@ def height_mm(blocks):
 
 # --- renderers ----------------------------------------------------------------
 
+def spacing_units(dots, divisor=SPACING_DIVISOR):
+    """Convert dots to ESC 3 units, clamped to the command's valid range."""
+    return max(0, min(255, round(dots * divisor / DPI)))
+
+
+def line_dots(block):
+    """Vertical space one line of this block needs: cell height + leading."""
+    font = FONTS.get(block.get('font', 'b'), FONTS['b'])
+    height = max(int(block.get('height', 1) or 1), 1)
+    leading = block.get('leading', LEADING_DOTS)
+    return font['cell_h'] * height + leading
+
+
 def render_escpos(blocks, printer):
-    """Emit blocks to a python-escpos printer. Does not cut or close."""
-    for block in blocks:
-        kind = block['type']
-        if kind == 'blank':
-            printer.text('\n' * block.get('count', 1))
-        elif kind == 'qr':
-            printer.set(align='center')
-            printer.qr(block['value'], size=block.get('size', 4), model=2)
-        elif kind == 'barcode':
-            printer.barcode(str(block['value']), 'CODE39',
-                            width=2, height=block.get('height', 60),
-                            pos='below', align_ct=True)
-        elif kind == 'rule':
-            font = block.get('font', 'b')
-            printer.set(align='center', font=font, bold=False,
-                        custom_size=True, width=1, height=1)
-            printer.text(block.get('char', '-') * columns_for(font) + '\n')
-        elif kind == 'text':
-            printer.set(align=block.get('align', 'center'),
-                        font=block.get('font', 'b'),
-                        bold=block.get('bold', False),
-                        custom_size=True,
-                        width=max(int(block.get('width', 1)), 1),
-                        height=max(int(block.get('height', 1)), 1))
-            printer.text(str(block['value']) + '\n')
+    """Emit blocks to a python-escpos printer. Does not cut or close.
+
+    Sets line spacing per block. Leaving it at the printer default made
+    double-height text overlap the line beneath it, and made the feed after a
+    QR image larger than intended. Spacing is reset at the end so the printer
+    is not left in a modified state for whatever prints next.
+    """
+    try:
+        for block in blocks:
+            kind = block['type']
+            if kind == 'blank':
+                printer.line_spacing(spacing_units(FONTS['b']['cell_h'] + LEADING_DOTS))
+                printer.text('\n' * block.get('count', 1))
+            elif kind == 'gap':
+                # A partial line: set the feed to exactly this many dots.
+                printer.line_spacing(spacing_units(block.get('dots', 8)))
+                printer.text('\n')
+            elif kind == 'qr':
+                printer.line_spacing(spacing_units(QR_LEADING_DOTS))
+                printer.set(align='center')
+                printer.qr(block['value'], size=block.get('size', 4), model=2)
+            elif kind == 'barcode':
+                printer.barcode(str(block['value']), 'CODE39',
+                                width=2, height=block.get('height', 60),
+                                pos='below', align_ct=True)
+            elif kind == 'rule':
+                font = block.get('font', 'b')
+                printer.line_spacing(spacing_units(line_dots(block)))
+                printer.set(align='center', font=font, bold=False,
+                            custom_size=True, width=1, height=1)
+                printer.text(block.get('char', '-') * columns_for(font) + '\n')
+            elif kind == 'text':
+                printer.line_spacing(spacing_units(line_dots(block)))
+                printer.set(align=block.get('align', 'center'),
+                            font=block.get('font', 'b'),
+                            bold=block.get('bold', False),
+                            custom_size=True,
+                            width=max(int(block.get('width', 1)), 1),
+                            height=max(int(block.get('height', 1)), 1))
+                printer.text(str(block['value']) + '\n')
+    finally:
+        printer.line_spacing()          # restore the printer default
 
 
 def stretch(line, source_cols, frame_width):
@@ -217,6 +274,8 @@ def render_text(blocks, page_width=PAGE_COLUMNS, proportional=False):
         kind = block['type']
         if kind == 'blank':
             out.extend([''] * block.get('count', 1))
+        elif kind == 'gap':
+            pass   # sub-line space; contributes height but no visible row
         elif kind == 'qr':
             modules = qr_modules(block['value'])
             size = block.get('size', 4)

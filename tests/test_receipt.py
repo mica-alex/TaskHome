@@ -67,10 +67,31 @@ def test_no_line_exceeds_the_column_count():
 
 # --- height estimation --------------------------------------------------------
 
-def test_double_height_text_is_twice_as_tall():
+def test_double_height_text_scales_the_cell_not_the_leading():
+    """Height is cell*multiplier + leading, so 2x is not exactly twice as
+    tall -- the leading is added once per line either way."""
     single = r.block_height(r.text('x', font='a', height=1))
     double = r.block_height(r.text('x', font='a', height=2))
-    assert double == single * 2
+    cell = r.FONTS['a']['cell_h']
+    assert single == cell + r.LEADING_DOTS
+    assert double == cell * 2 + r.LEADING_DOTS
+
+
+def test_leading_prevents_tall_text_overlapping():
+    """The clipping bug: the printer's default feed (~34 dots) is shorter than
+    a double-height cell (48), so the next line printed into the descenders."""
+    assert r.line_dots(r.text('x', font='a', height=2)) > r.FONTS['a']['cell_h'] * 2
+
+
+def test_spacing_units_stay_in_command_range():
+    for dots in (0, 1, 54, 500, -5):
+        assert 0 <= r.spacing_units(dots) <= 255
+
+
+def test_gap_contributes_height_but_no_row():
+    blocks = [r.gap(6)]
+    assert r.block_height(blocks[0]) == 6
+    assert r.render_text(blocks) == []
 
 
 def test_wrapped_text_is_taller():
@@ -109,6 +130,9 @@ class RecordingPrinter:
     def set(self, **kwargs):
         self.calls.append(('set', kwargs))
 
+    def line_spacing(self, spacing=None, divisor=180):
+        self.calls.append(('line_spacing', spacing))
+
     def text(self, value):
         self.calls.append(('text', value))
 
@@ -118,6 +142,21 @@ class RecordingPrinter:
     def barcode(self, value, bc=None, **kwargs):
         # Matches python-escpos: barcode(code, bc, ...) with bc positional.
         self.calls.append(('barcode', value))
+
+
+def test_spacing_is_reset_after_rendering():
+    """Leaving the printer in a modified spacing state would corrupt whatever
+    prints next."""
+    p = RecordingPrinter()
+    r.render_escpos([r.text('x', font='a', height=2)], p)
+    assert p.calls[-1] == ('line_spacing', None)
+
+
+def test_spacing_is_set_before_each_text_block():
+    p = RecordingPrinter()
+    r.render_escpos([r.text('x', font='a', height=2)], p)
+    spacings = [c[1] for c in p.calls if c[0] == 'line_spacing' and c[1] is not None]
+    assert spacings == [r.spacing_units(r.line_dots(r.text('x', font='a', height=2)))]
 
 
 def test_escpos_renderer_emits_every_block():
