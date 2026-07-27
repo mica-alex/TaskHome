@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from dateutil import parser
 
@@ -472,13 +473,47 @@ def run_catchup(now=None):
     return changed
 
 
-def fire_due_task(task, now):
-    """Print a task if it is due and reschedule it. Returns True if it fired."""
+def fire_due_task(task, now, catchup_config=None):
+    """Print a task if it is due and reschedule it. Returns True if it fired.
+
+    The schedule advances ONLY on a successful print (P0-4). Previously an
+    offline printer silently dropped the occurrence and moved on, so a task
+    due while the printer was unplugged was lost forever. Now it stays due and
+    retries each tick until the printer comes back.
+    """
     if parse_task_time(task['next_time']) > now:
         return False
 
-    print_task(task)
-    next_time, _missed = advance_schedule(task, now)
+    if not print_task(task):
+        # Leave next_time alone so the occurrence is retried, and record the
+        # failure so the UI can show "waiting for printer" rather than looking
+        # stuck for no visible reason.
+        task['print_failures'] = task.get('print_failures', 0) + 1
+        task['last_print_failure'] = now.isoformat()
+        app.logger.warning(
+            f"Print failed for task {task.get('id')}; "
+            f"leaving it due (attempt {task['print_failures']})")
+        return False
+
+    task.pop('print_failures', None)
+    task.pop('last_print_failure', None)
+
+    next_time, missed = advance_schedule(task, now)
+    # missed[0] is the occurrence just printed; anything after it came due
+    # while the printer was offline and is governed by the catch-up policy.
+    extra = missed[1:] if missed else []
+    if extra:
+        cfg = catchup_config or get_catchup_config()
+        policy = resolve_catchup_policy(task, cfg)
+        occurrences, dropped = select_catchup_prints(extra, policy, cfg, now)
+        app.logger.info(
+            f"Task {task.get('id')} recovered with {len(extra)} further missed "
+            f"occurrence(s), policy={policy}, printing {len(occurrences)}")
+        if occurrences:
+            print_catchup(task, occurrences, len(extra), dropped, policy)
+        task['missed_count'] = task.get('missed_count', 0) + len(extra)
+        task['last_missed_at'] = extra[-1]
+
     if next_time is None:
         if task in tasks:
             tasks.remove(task)
@@ -487,153 +522,232 @@ def fire_due_task(task, now):
     return True
 
 
+@contextmanager
+def open_printer():
+    """Open the printer, guaranteeing the USB handle is released (P0-11).
+
+    The previous code only called close() on the success path, so any
+    exception mid-receipt leaked the claimed interface; enough of those and
+    the device stops opening until it is physically replugged.
+    """
+    printer = Usb(VID, PID, profile='TM-T20II')
+    try:
+        yield printer
+    finally:
+        try:
+            printer.close()
+        except Exception as e:  # closing must never mask the original error
+            app.logger.warning(f"Error closing printer: {e}")
+
+
+def record_history(record):
+    """Prepend a print record and trim to the configured cap."""
+    history.insert(0, record)
+    max_history = config.get('max_history', DEFAULT_CONFIG['max_history'])
+    try:
+        max_history = int(max_history)
+    except (TypeError, ValueError):
+        max_history = DEFAULT_CONFIG['max_history']
+    del history[max(max_history, 0):]
+    save_history()
+
+
 def print_task(task):
+    """Print a task receipt. Returns True only if paper actually came out.
+
+    The return value matters: the scheduler must not advance a task's schedule
+    for a print that never happened (P0-4), and the test-print routes must not
+    claim success when the print failed (P0-10).
+    """
     if not is_printer_connected():
         app.logger.warning("Printer not connected, skipping print")
-        return
+        return False
     try:
-        p = Usb(VID, PID, profile='TM-T20II')
-        # p.profile.media_width_mm = 80  # Set paper width to 80mm
-        # QR code at the top
-        p.set(align='center', density=4)
-        qr_url = task.get('url', '') or f"http://{config['hostname']}:{get_port()}/task_page#{task['id']}"
-        p.qr(qr_url, size=5, model=2)
+        with open_printer() as p:
+            # p.profile.media_width_mm = 80  # Set paper width to 80mm
+            # QR code at the top
+            p.set(align='center', density=4)
+            hostname = config.get('hostname', DEFAULT_CONFIG['hostname'])
+            qr_url = task.get('url', '') or f"http://{hostname}:{get_port()}/task_page#{task['id']}"
+            p.qr(qr_url, size=5, model=2)
 
-        # Title: bold, large, centered
-        p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
-        p.text(task['title'] + '\n')
+            # Title: bold, large, centered
+            p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
+            p.text(task['title'] + '\n')
 
-        # Extra info: regular, left-aligned
-        if 'extra' in task and task['extra']:
+            # Extra info: regular, left-aligned
+            if 'extra' in task and task['extra']:
+                # Blank line
+                p.text('\n')
+                p.set(align='center', font='b', bold=False, custom_size=True, width=2, height=2)
+                p.text(task['extra'] + '\n')
+
             # Blank line
             p.text('\n')
-            p.set(align='center', font='b', bold=False, custom_size=True, width=2, height=2)
-            p.text(task['extra'] + '\n')
 
-        # Blank line
-        p.text('\n')
+            # Timestamp: italic, left-aligned
+            print_time = datetime.now().strftime('%I:%M %p, %m/%d/%Y')
+            p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
+            p.text(f'Printed at {print_time}\n')
 
-        # Timestamp: italic, left-aligned
-        print_time = datetime.now().strftime('%I:%M %p, %m/%d/%Y')
-        p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
-        p.text(f'Printed at {print_time}\n')
+            # Blank line
+            p.text('\n')
 
-        # Blank line
-        p.text('\n')
+            # Task Type: italic, left-aligned
+            recurring = task.get('recurring', 'none')
+            task_type = 'Non-recurring' if recurring == 'none' else f"Recurring ({recurring.capitalize()})"
+            p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
+            p.text(f'Task Type: {task_type}\n')
 
-        # Task Type: italic, left-aligned
-        task_type = 'Non-recurring' if task['recurring'] == 'none' else f"Recurring ({task['recurring'].capitalize()})"
-        p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
-        p.text(f'Task Type: {task_type}\n')
+            # Task ID: italic, left-aligned
+            p.text(f'Task ID: {task["id"]}\n')
 
-        # Task ID: italic, left-aligned
-        p.text(f'Task ID: {task["id"]}\n')
+            # Disable italics and cut
+            p.cut()
 
-        # Disable italics and cut
-        p.cut()
-        p.close()
-
-        # Add to history
-        printed_task = {**task, 'print_time': datetime.now().isoformat(), 'type': 'task'}
-        history.insert(0, printed_task)
-        history[:] = history[:config['max_history']]
-        save_history()
+        # Only recorded once the receipt is out and the handle is closed.
+        record_history({**task, 'print_time': datetime.now().isoformat(), 'type': 'task'})
+        return True
     except Exception as e:
-        app.logger.error(f"Print error: {e}")
+        app.logger.error(f"Print error: {e}", exc_info=True)
+        return False
+
+
+def scf_has_media(issue):
+    """Whether an issue carries a full-size image.
+
+    `media` may be absent, null, or present-without-image_full depending on
+    the issue; indexing it blindly raised mid-receipt, wasting paper on a
+    half-printed job (P0-8).
+    """
+    media = issue.get('media')
+    if not isinstance(media, dict):
+        return False
+    return bool(media.get('image_full'))
+
+
+def scf_category(issue):
+    request_type = issue.get('request_type')
+    if isinstance(request_type, dict) and request_type.get('title'):
+        return request_type['title']
+    return 'Unknown Category'
+
+
+def scf_reported_at(issue):
+    created = issue.get('created_at')
+    if not created:
+        return 'Unknown'
+    try:
+        return datetime.fromisoformat(created.replace('Z', '+00:00')).strftime('%I:%M %p, %m/%d/%Y')
+    except (ValueError, AttributeError):
+        app.logger.warning(f"Unparseable SCF created_at {created!r}")
+        return str(created)
 
 
 def print_scf_issue(issue):  # New: Custom print for SCF issues
+    """Print an SCF issue receipt. Returns True only if it actually printed."""
     if not is_printer_connected():
         app.logger.warning("Printer not connected, skipping SCF issue print")
-        return
+        return False
+
+    # Resolve every field BEFORE opening the printer, so a malformed payload
+    # fails without wasting paper on a partial receipt (P0-8).
+    category = scf_category(issue)
+    address = issue.get('address', 'Unknown Location')
+    reported_at = scf_reported_at(issue)
+    status = issue.get('status', 'Unknown')
+    has_media = 'Yes' if scf_has_media(issue) else 'No'
+    html_url = issue.get('html_url', '')
+    issue_id = issue.get('id', 'unknown')
+    description = issue.get('description') or ''
+
     try:
-        p = Usb(VID, PID, profile='TM-T20II')
-        # QR code at the top (to issue HTML URL)
-        p.set(align='center', density=4)
-        p.qr(issue['html_url'], size=5, model=2)
+        with open_printer() as p:
+            # QR code at the top (to issue HTML URL)
+            if html_url:
+                p.set(align='center', density=4)
+                p.qr(html_url, size=5, model=2)
 
-        # Category: bold, large, centered (like title)
-        category = issue['request_type']['title'] if 'request_type' in issue and issue[
-            'request_type'] else 'Unknown Category'
-        p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
-        p.text(category + '\n')
+            # Category: bold, large, centered (like title)
+            p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
+            p.text(category + '\n')
 
-        # Blank line
-        p.text('\n')
+            # Blank line
+            p.text('\n')
 
-        # Location, reported timestamp, status (smaller text)
-        p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
-        address = issue.get('address', 'Unknown Location')
-        reported_at = datetime.fromisoformat(issue['created_at'].replace('Z', '+00:00')).strftime(
-            '%I:%M %p, %m/%d/%Y') if 'created_at' in issue else 'Unknown'
-        status = issue.get('status', 'Unknown')
-        p.text(f'Location: {address}\n')
-        p.text(f'Reported: {reported_at}\n')
-        p.text(f'Status: {status}\n')
-        p.text(f'Has Media: {"Yes" if "media" in issue and issue["media"]["image_full"] else "No"}\n')
+            # Location, reported timestamp, status (smaller text)
+            p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
+            p.text(f'Location: {address}\n')
+            p.text(f'Reported: {reported_at}\n')
+            p.text(f'Status: {status}\n')
+            p.text(f'Has Media: {has_media}\n')
 
-        # Description (if present)
-        if 'description' in issue and issue['description']:
-            p.text('\nDescription:\n')
-            p.text(issue['description'] + '\n')
+            # Description (if present)
+            if description:
+                p.text('\nDescription:\n')
+                p.text(description + '\n')
 
-        # Blank line
-        p.text('\n')
+            # Blank line
+            p.text('\n')
 
-        # Print timestamp
-        print_time = datetime.now().strftime('%I:%M %p, %m/%d/%Y')
-        p.text(f'Printed at {print_time}\n')
+            # Print timestamp
+            print_time = datetime.now().strftime('%I:%M %p, %m/%d/%Y')
+            p.text(f'Printed at {print_time}\n')
 
-        # Issue ID
-        try:
-            p.barcode(str(issue['id']), 'CODE39', width=2, height=60, pos='below', align_ct=True)
-        except Exception as e:
-            p.text(f'Issue ID: {issue["id"]}\n')
-            app.logger.error(f"Barcode print error: {e}")
+            # Issue ID
+            try:
+                p.barcode(str(issue_id), 'CODE39', width=2, height=60, pos='below', align_ct=True)
+            except Exception as e:
+                p.text(f'Issue ID: {issue_id}\n')
+                app.logger.error(f"Barcode print error: {e}")
 
-        # Cut
-        p.cut()
-        p.close()
+            # Cut
+            p.cut()
 
         # Add to history
-        printed_issue = {
+        record_history({
             'type': 'scf',
-            'id': issue['id'],
+            'id': issue_id,
             'category': category,
             'summary': issue.get('summary', ''),
             'address': address,
             'reported_at': issue.get('created_at', ''),
             'status': status,
-            'description': issue.get('description', ''),
-            'url': issue['html_url'],
+            'description': description,
+            'url': html_url,
             'print_time': datetime.now().isoformat()
-        }
-        history.insert(0, printed_issue)
-        history[:] = history[:config['max_history']]
-        save_history()
+        })
+        return True
     except Exception as e:
-        app.logger.error(f"SCF issue print error: {e}")
+        app.logger.error(f"SCF issue print error: {e}", exc_info=True)
+        return False
 
 
 def run_due_tasks(now):
     """Fire every due task. Each task is isolated: one unusable task cannot
     stall the others or the listener poll (P0-6). Returns tasks fired."""
     fired = 0
+    changed = 0
+    cfg = get_catchup_config()
     for task in list(tasks):
         if not task.get('enabled', True):
             continue
+        failures_before = task.get('print_failures')
         try:
-            if fire_due_task(task, now):
+            if fire_due_task(task, now, cfg):
                 fired += 1
+                changed += 1
+            elif task.get('print_failures') != failures_before:
+                changed += 1  # a failed print still needs persisting
         except (ScheduleError, ValueError) as e:
             task['enabled'] = False
             task['schedule_error'] = str(e)
-            fired += 1  # forces a save
+            changed += 1
             app.logger.error(f"Disabling task {task.get('id')} - {e}")
         except Exception as e:
             app.logger.error(
                 f"Error firing task {task.get('id')}: {e}", exc_info=True)
-    if fired:
+    if changed:
         save_tasks()
     return fired
 
@@ -755,29 +869,35 @@ def settings():
 @app.route('/test_print', methods=['POST'])
 def test_print():
     if not is_printer_connected():
-        return 'Printer not connected. <a href="/settings">Back</a>'
+        # 503, not 200: the front end trusts the status code, so a "not
+        # connected" reply must not read as success (P0-10).
+        return 'Printer not connected. <a href="/settings">Back</a>', 503
     try:
         # Create a test task with example data
         test_task = {
             'id': str(uuid.uuid4()),
             'title': 'Test Task Print',
             'extra': 'This is a test print from TaskHome',
-            'url': f"http://{config['hostname']}:{get_port()}/task_page#test",
+            'url': f"http://{config.get('hostname', DEFAULT_CONFIG['hostname'])}:{get_port()}/task_page#test",
             'next_time': datetime.now().isoformat(),
             'recurring': 'none',
             'enabled': True
         }
-        print_task(test_task)
-        return 'Test print successful! <a href="/settings">Back</a>'
+        # print_task swallows its own errors, so the return value is the only
+        # honest signal of whether paper came out (P0-10).
+        if print_task(test_task):
+            return 'Test print successful! <a href="/settings">Back</a>'
+        return ('Test print failed - see the log for details. '
+                '<a href="/settings">Back</a>'), 500
     except Exception as e:
         app.logger.error(f"Test print error: {e}")
-        return f'Test print failed: {e}. <a href="/settings">Back</a>'
+        return f'Test print failed: {e}. <a href="/settings">Back</a>', 500
 
 
 @app.route('/test_scf_print', methods=['POST'])
 def test_scf_print():
     if not is_printer_connected():
-        return 'Printer not connected. <a href="/settings">Back</a>'
+        return 'Printer not connected. <a href="/settings">Back</a>', 503
     try:
         # Example SCF issue data
         test_issue = {
@@ -795,11 +915,13 @@ def test_scf_print():
                 'image_square_100x100': 'https://seeclickfix.com/media/issues/12345678/thumb.jpg'
             }
         }
-        print_scf_issue(test_issue)
-        return 'Test SCF issue print successful! <a href="/settings">Back</a>'
+        if print_scf_issue(test_issue):
+            return 'Test SCF issue print successful! <a href="/settings">Back</a>'
+        return ('Test SCF issue print failed - see the log for details. '
+                '<a href="/settings">Back</a>'), 500
     except Exception as e:
         app.logger.error(f"Test SCF print error: {e}")
-        return f'Test SCF print failed: {e}. <a href="/settings">Back</a>'
+        return f'Test SCF print failed: {e}. <a href="/settings">Back</a>', 500
 
 
 @app.route('/add_task', methods=['POST'])

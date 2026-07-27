@@ -285,6 +285,97 @@ def test_broken_task_is_disabled_not_retried_forever(clean_state, make_task):
     assert len(clean_state) == before
 
 
+# --- printer offline (P0-4) ---------------------------------------------------
+
+def test_offline_printer_does_not_advance_the_schedule(clean_state, make_task):
+    """The occurrence must survive an offline printer, not be silently lost."""
+    clean_state.online = False
+    task = make_task('2026-03-05T09:00:00', 'daily')
+    taskhome.tasks.append(task)
+
+    taskhome.run_due_tasks(dt('2026-03-05T09:30:00'))
+
+    assert clean_state == []
+    assert task['next_time'] == '2026-03-05T09:00:00'  # unchanged: still due
+    assert task['print_failures'] == 1
+
+
+def test_offline_printer_retries_until_it_succeeds(clean_state, make_task):
+    clean_state.online = False
+    task = make_task('2026-03-05T09:00:00', 'daily')
+    taskhome.tasks.append(task)
+
+    taskhome.run_due_tasks(dt('2026-03-05T09:30:00'))
+    taskhome.run_due_tasks(dt('2026-03-05T09:31:00'))
+    assert task['print_failures'] == 2
+    assert clean_state == []
+
+    clean_state.online = True
+    taskhome.run_due_tasks(dt('2026-03-05T09:32:00'))
+
+    assert len(clean_state) == 1
+    assert task['next_time'] == '2026-03-06T09:00:00'
+    assert 'print_failures' not in task  # cleared on success
+
+
+def test_offline_oneoff_is_not_dropped(clean_state, make_task):
+    """A one-off is removed after firing, so losing it to an offline printer
+    would be unrecoverable."""
+    clean_state.online = False
+    task = make_task('2026-03-05T09:00:00', 'none')
+    taskhome.tasks.append(task)
+
+    taskhome.run_due_tasks(dt('2026-03-05T09:30:00'))
+    assert taskhome.tasks == [task]  # still there
+
+    clean_state.online = True
+    taskhome.run_due_tasks(dt('2026-03-05T09:31:00'))
+    assert len(clean_state) == 1
+    assert taskhome.tasks == []
+
+
+def test_recovery_after_long_outage_applies_catchup_policy(clean_state, make_task):
+    """Printer offline for days: print the current occurrence once, and let
+    the catch-up policy govern the intervening ones (default: skip)."""
+    clean_state.online = False
+    task = make_task('2026-03-01T09:00:00', 'daily')
+    taskhome.tasks.append(task)
+    taskhome.run_due_tasks(dt('2026-03-01T09:30:00'))
+
+    clean_state.online = True
+    taskhome.run_due_tasks(dt('2026-03-05T12:00:00'))
+
+    assert len(clean_state) == 1              # one receipt, not four
+    assert task['next_time'] == '2026-03-06T09:00:00'
+    assert task['missed_count'] == 4          # but the gap is recorded
+
+
+def test_recovery_honours_print_all_policy(clean_state, make_task):
+    taskhome.config['catchup'] = {'policy': 'print_all'}
+    clean_state.online = False
+    task = make_task('2026-03-01T09:00:00', 'daily')
+    taskhome.tasks.append(task)
+    taskhome.run_due_tasks(dt('2026-03-01T09:30:00'))
+
+    clean_state.online = True
+    taskhome.run_due_tasks(dt('2026-03-05T12:00:00'))
+
+    # The due occurrence plus the four that elapsed during the outage.
+    assert len(clean_state) == 5
+
+
+def test_failed_print_is_persisted(clean_state, make_task, monkeypatch):
+    """A failed print mutates the task, so it must trigger a save even though
+    nothing 'fired'."""
+    saves = []
+    monkeypatch.setattr(taskhome, 'save_tasks', lambda: saves.append(1) or True)
+    clean_state.online = False
+    taskhome.tasks.append(make_task('2026-03-05T09:00:00', 'daily'))
+
+    taskhome.run_due_tasks(dt('2026-03-05T09:30:00'))
+    assert saves, 'failed print was not persisted'
+
+
 def test_catchup_then_steady_state_does_not_double_fire(clean_state, make_task):
     """The integration invariant: catch-up decides to skip, and the loop that
     runs a moment later must honour that rather than firing immediately."""

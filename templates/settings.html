@@ -73,33 +73,30 @@
                 M.toast({html: msg, classes: success ? 'green' : 'red'});
             }
 
-            // Test Task Print
-            document.getElementById('test-task-print-btn').addEventListener('click', function() {
-                fetch('{{ url_for("test_print") }}', {method: 'POST'})
-                    .then(resp => resp.text())
-                    .then(txt => {
-                        if (txt.includes('successful')) {
-                            showToast('Test task print sent!');
-                        } else {
-                            showToast('Test task print failed.', false);
-                        }
-                    })
-                    .catch(() => showToast('Test task print error.', false));
-            });
+            /*
+             * Test prints. The server now reports failure with a non-2xx
+             * status, so trust resp.ok rather than sniffing the body for the
+             * substring 'successful' (which also matched "print failed:
+             * ... successful" style messages). Buttons disable while the
+             * request is in flight so a double click can't emit two receipts.
+             */
+            function wireTestPrint(buttonId, url, label) {
+                const button = document.getElementById(buttonId);
+                if (!button) return;
+                button.addEventListener('click', function() {
+                    if (button.disabled) return;
+                    button.disabled = true;
+                    fetch(url, {method: 'POST'})
+                        .then(resp => {
+                            showToast(resp.ok ? label + ' sent!' : label + ' failed.', resp.ok);
+                        })
+                        .catch(() => showToast(label + ' error.', false))
+                        .finally(() => { button.disabled = false; });
+                });
+            }
 
-            // Test SCF Print
-            document.getElementById('test-scf-print-btn').addEventListener('click', function() {
-                fetch('{{ url_for("test_scf_print") }}', {method: 'POST'})
-                    .then(resp => resp.text())
-                    .then(txt => {
-                        if (txt.includes('successful')) {
-                            showToast('Test SCF print sent!');
-                        } else {
-                            showToast('Test SCF print failed.', false);
-                        }
-                    })
-                    .catch(() => showToast('Test SCF print error.', false));
-            });
+            wireTestPrint('test-task-print-btn', '{{ url_for("test_print") }}', 'Test task print');
+            wireTestPrint('test-scf-print-btn', '{{ url_for("test_scf_print") }}', 'Test SCF print');
         });
     </script>
 </div>

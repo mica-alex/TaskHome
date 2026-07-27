@@ -17,15 +17,30 @@ import pytest  # noqa: E402
 import app as taskhome  # noqa: E402
 
 
+class PrintLog(list):
+    """Records what would have been printed, and can simulate an offline
+    printer by setting `.online = False` (used to test P0-4).
+
+    Subclasses list so tests can assert on it directly.
+    """
+    online = True
+
+
 @pytest.fixture
 def clean_state(monkeypatch):
     """Isolate module-level globals and neuter every path that writes to disk
-    or to the printer. Yields a recorder of what *would* have been printed.
+    or to the printer. Yields a PrintLog of what *would* have been printed.
 
     This is a minimal stand-in for the fake printer backend in MASTER_PLAN
     P1-4 — it proves the scheduler logic without hardware.
     """
-    printed = []
+    printed = PrintLog()
+
+    def fake_print(task):
+        if not printed.online:
+            return False
+        printed.append(task)
+        return True
 
     monkeypatch.setattr(taskhome, 'tasks', [])
     monkeypatch.setattr(taskhome, 'history', [])
@@ -37,8 +52,8 @@ def clean_state(monkeypatch):
     monkeypatch.setattr(taskhome, 'save_history', lambda: None)
     monkeypatch.setattr(taskhome, 'save_config', lambda: None)
     monkeypatch.setattr(taskhome, 'save_listeners', lambda: None)
-    monkeypatch.setattr(taskhome, 'print_task', lambda task: printed.append(task))
-    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: False)
+    monkeypatch.setattr(taskhome, 'print_task', fake_print)
+    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: printed.online)
 
     yield printed
 

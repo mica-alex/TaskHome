@@ -63,5 +63,43 @@ def test_task_titles_are_escaped(client, clean_state, make_task):
     assert '&lt;script&gt;' in body
 
 
-def test_index_shows_printer_status(client):
+@pytest.mark.parametrize('route', ['/test_print', '/test_scf_print'])
+def test_test_print_disconnected_is_not_a_success(client, clean_state, monkeypatch, route):
+    """The front end trusts the status code, so 'Printer not connected' must
+    not come back as 200 or it renders as a success toast."""
+    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: False)
+    assert client.post(route).status_code == 503
+
+
+def test_test_print_reports_failure_honestly(client, clean_state, monkeypatch):
+    """P0-10: this used to return 'Test print successful!' even when nothing
+    printed, because print_task swallowed its own exceptions."""
+    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: True)
+    monkeypatch.setattr(taskhome, 'print_task', lambda task: False)
+    resp = client.post('/test_print')
+    assert resp.status_code == 500
+    assert 'failed' in resp.get_data(as_text=True)
+
+
+def test_test_print_reports_success(client, clean_state, monkeypatch):
+    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: True)
+    monkeypatch.setattr(taskhome, 'print_task', lambda task: True)
+    resp = client.post('/test_print')
+    assert resp.status_code == 200
+    assert 'successful' in resp.get_data(as_text=True)
+
+
+def test_test_scf_print_reports_failure_honestly(client, clean_state, monkeypatch):
+    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: True)
+    monkeypatch.setattr(taskhome, 'print_scf_issue', lambda issue: False)
+    assert client.post('/test_scf_print').status_code == 500
+
+
+def test_index_shows_printer_connected(client, clean_state):
+    clean_state.online = True
+    assert 'Connected' in client.get('/').get_data(as_text=True)
+
+
+def test_index_shows_printer_disconnected(client, clean_state):
+    clean_state.online = False
     assert 'Not connected' in client.get('/').get_data(as_text=True)
