@@ -52,6 +52,45 @@ COMMON_EVENTS = (
 
 CACHE_FILENAME = 'nws_zones.json'
 
+#: Bumped when a cached entry gains a field. An entry from an older version is
+#: re-resolved rather than used half-empty -- the cache has no TTL, so a stale
+#: shape would otherwise persist forever.
+CACHE_VERSION = 2
+
+ZONE_URL = 'https://api.weather.gov/zones/{kind}/{code}'
+
+#: Names come back bare -- 'Hillsborough', not 'Hillsborough County' -- and the
+#: right noun is not always "County". Louisiana has parishes; Alaska has
+#: boroughs, municipalities and census areas; Virginia and Maryland have
+#: independent cities whose names already say so.
+COUNTY_NOUN_BY_STATE = {'LA': 'Parish'}
+NOUNS_ALREADY_PRESENT = ('County', 'Parish', 'Borough', 'Municipality', 'City',
+                         'Census Area', 'Island', 'Municipio', 'District')
+#: States where the subdivision type varies enough that guessing is worse than
+#: saying nothing.
+STATES_WITHOUT_A_SAFE_NOUN = {'AK', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP'}
+
+
+def county_label(name, state):
+    """'Hillsborough', 'NH' -> 'Hillsborough County, NH'.
+
+    The point is disambiguation: Hillsborough is also a town in New Hampshire,
+    and that collision is common enough across the country that a bare name on
+    a receipt is genuinely ambiguous.
+    """
+    name = (name or '').strip()
+    if not name:
+        return ''
+    state = (state or '').strip().upper()
+
+    if any(noun in name for noun in NOUNS_ALREADY_PRESENT):
+        label = name                      # 'City of Alexandria', 'Baltimore City'
+    elif state in STATES_WITHOUT_A_SAFE_NOUN:
+        label = name                      # better bare than confidently wrong
+    else:
+        label = f"{name} {COUNTY_NOUN_BY_STATE.get(state, 'County')}"
+    return f'{label}, {state}' if state else label
+
 
 def cache_path():
     import os
@@ -84,8 +123,9 @@ def resolve_zip(zipcode):
     """
     zipcode = str(zipcode).strip()[:5]
     cache = load_zone_cache()
-    if zipcode in cache:
-        return cache[zipcode]
+    cached = cache.get(zipcode)
+    if cached and cached.get('cache_version') == CACHE_VERSION:
+        return cached
 
     place = requests.get(ZIP_URL.format(zip=zipcode), timeout=15)
     place.raise_for_status()
@@ -99,17 +139,50 @@ def resolve_zip(zipcode):
     point.raise_for_status()
     props = point.json().get('properties', {})
 
+    county_code = (props.get('county') or '').rsplit('/', 1)[-1]
+    county_name, state = _county_identity(
+        county_code, props, location.get('state abbreviation', ''))
+
     resolved = {
+        'cache_version': CACHE_VERSION,
         'zip': zipcode,
+        'city': location.get('place name', '') or
+                (props.get('relativeLocation', {}).get('properties', {}) or {}).get('city', ''),
+        'state': state,
         'place': f"{location.get('place name', '')}, {location.get('state abbreviation', '')}".strip(', '),
         'zone': (props.get('forecastZone') or '').rsplit('/', 1)[-1],
-        'county': (props.get('county') or '').rsplit('/', 1)[-1],
+        'county': county_code,
+        'county_name': county_name,
+        'county_label': county_label(county_name, state),
         'timezone': props.get('timeZone'),
     }
     cache[zipcode] = resolved
     save_zone_cache(cache)
     log.info(f"Resolved ZIP {zipcode} -> {resolved['place']} zone {resolved['zone']}")
     return resolved
+
+
+def _county_identity(county_code, point_props, fallback_state):
+    """The county's display name and state.
+
+    One extra request per ZIP, for a value that never changes and is cached
+    forever. Failing here must not fail the whole resolution -- an alert with a
+    slightly less precise area line is much better than no alert.
+    """
+    relative = (point_props.get('relativeLocation', {}).get('properties', {}) or {})
+    state = relative.get('state') or fallback_state or ''
+    if not county_code:
+        return '', state
+    try:
+        response = requests.get(
+            ZONE_URL.format(kind='county', code=county_code),
+            headers=_headers(), timeout=15)
+        response.raise_for_status()
+        zone = response.json().get('properties', {})
+        return zone.get('name') or '', zone.get('state') or state
+    except Exception as e:
+        log.warning(f"Could not name county zone {county_code}: {e}")
+        return '', state
 
 
 def default_matrix_row(event):
@@ -177,7 +250,8 @@ class NWSListener(base.Listener):
         'severity': 'Severe',
         'urgency': 'Immediate',
         'headline': 'Severe Thunderstorm Warning issued July 27 at 10:41AM EDT',
-        'area': 'Hillsborough, NH',
+        'area': 'Manchester (03102) - Hillsborough County, NH',
+        'area_nws': 'Hillsborough, NH',
         'effective': '10:41 AM',
         'expires': '11:45 AM',
         'instruction': 'Move to an interior room on the lowest floor.',
@@ -251,7 +325,15 @@ class NWSListener(base.Listener):
             props = feature.get('properties') or {}
             if not config.get('include_test') and props.get('status') != 'Actual':
                 continue
-            props['_zones'] = zones
+            # Only the zones this alert actually covers, not every configured
+            # one -- otherwise the receipt claims a tornado warning for a ZIP
+            # three counties away that merely happens to be in the settings.
+            affected = {url.rsplit('/', 1)[-1]
+                        for url in (props.get('affectedZones') or [])}
+            matched = {code: resolved for code, resolved in zones.items()
+                       if code in affected}
+            props['_zones'] = matched or zones
+            props['_zones_exact'] = bool(matched)
             alerts.append(props)
         return alerts
 
@@ -327,7 +409,8 @@ class NWSListener(base.Listener):
             'severity': alert.get('severity', 'Unknown'),
             'urgency': alert.get('urgency', 'Unknown'),
             'headline': alert.get('headline', ''),
-            'area': alert.get('areaDesc', ''),
+            'area': self.area_label(alert),
+            'area_nws': alert.get('areaDesc', ''),
             'effective': _clock(alert.get('effective')),
             'expires': _clock(alert.get('expires')),
             'instruction': (alert.get('instruction') or '').strip(),
@@ -336,7 +419,7 @@ class NWSListener(base.Listener):
             'printed': layouts._stamp(),
         }
 
-    def blocks_from_context(self, context, loud):
+    def blocks_from_context(self, context, big_title=True, description=True):
         """The layout, over already-resolved values.
 
         Split out from receipt_blocks so the Studio presets and the printed
@@ -346,10 +429,15 @@ class NWSListener(base.Listener):
 
         `context` may hold real values or `{placeholder}` markers; the layout
         does not care, which is what makes one function serve both.
+
+        Title size and description are separate knobs. They used to be one
+        "loud" flag, which meant a wind advisory could not have a readable
+        headline without also printing 600 characters of forecast discussion.
         """
         blocks = [
-            receipt.text(context['event'], font='a', width=2 if loud else 1,
-                         height=2 if loud else 1, bold=True),
+            receipt.text(context['event'], font='a',
+                         width=2 if big_title else 1,
+                         height=2 if big_title else 1, bold=True),
             receipt.gap(6),
             receipt.text(f"{context['severity']} - {context['urgency']}",
                          font='b', bold=True),
@@ -359,13 +447,51 @@ class NWSListener(base.Listener):
         if context.get('instruction'):
             blocks.append(receipt.rule())
             blocks.append(receipt.text(context['instruction'], font='b', align='left'))
-        if loud and context.get('description'):
+        if description and context.get('description'):
             blocks.append(receipt.rule())
             blocks.append(receipt.text(str(context['description'])[:600],
                                        font='b', align='left'))
         blocks.append(receipt.rule())
         blocks.append(receipt.text(f"NWS - Printed {context['printed']}", font='b'))
         return blocks
+
+    def area_label(self, alert):
+        """'Manchester (03102) - Hillsborough County, NH'.
+
+        Built from the ZIPs that were configured rather than from the alert's
+        own areaDesc, which is a bare county name like 'Hillsborough, NH'.
+        That is ambiguous: Hillsborough is also a town in New Hampshire, and
+        the same collision happens across most of the country.
+
+        Several of your ZIPs can share a county, and one alert can cover ZIPs
+        in different counties, so places are grouped under their county.
+        """
+        zones = alert.get('_zones') or {}
+        if not zones:
+            return alert.get('areaDesc', '')
+
+        # Several zone codes (forecast and county) map to the same ZIP.
+        by_county = {}
+        for resolved in zones.values():
+            label = resolved.get('county_label') or resolved.get('place') or ''
+            place = resolved.get('city') or resolved.get('place') or ''
+            code = resolved.get('zip') or ''
+            entry = f'{place} ({code})' if place and code else place or code
+            if entry and entry not in by_county.setdefault(label, []):
+                by_county[label].append(entry)
+
+        parts = []
+        for label, places in by_county.items():
+            joined = ', '.join(sorted(places))
+            parts.append(f'{joined} - {label}' if label else joined)
+        line = '; '.join(sorted(parts))
+
+        # An alert whose zones we could not match exactly is described with the
+        # NWS text as well, so the receipt never overstates how precisely it
+        # knows where this applies.
+        if not alert.get('_zones_exact') and alert.get('areaDesc'):
+            return f"{alert['areaDesc']}"
+        return line or alert.get('areaDesc', '')
 
     def receipt_blocks(self, alert):
         """Fallback layout when no template is configured.
@@ -375,7 +501,8 @@ class NWSListener(base.Listener):
         """
         context = self.context(alert)
         return self.blocks_from_context(
-            context, loud=context['severity'] in ('Extreme', 'Severe'))
+            context, big_title=True,
+            description=context['severity'] in ('Extreme', 'Severe'))
 
     def template_presets(self):
         """Two shipped layouts, because one size genuinely does not fit.
@@ -385,8 +512,12 @@ class NWSListener(base.Listener):
         """
         markers = {key: '{%s}' % key for key in self.PLACEHOLDERS}
         return [
-            (f'{self.name}-default', self.blocks_from_context(markers, loud=True)),
-            (f'{self.name}-compact', self.blocks_from_context(markers, loud=False)),
+            (f'{self.name}-default',
+             self.blocks_from_context(markers, big_title=True, description=True)),
+            (f'{self.name}-compact',
+             self.blocks_from_context(markers, big_title=True, description=False)),
+            (f'{self.name}-minimal',
+             self.blocks_from_context(markers, big_title=False, description=False)),
         ]
 
     def template_name(self, config, alert):

@@ -76,7 +76,7 @@ def test_schema_declares_a_matrix_for_event_types():
 # --- zone resolution ----------------------------------------------------------
 
 def test_zone_resolution_is_cached(store, monkeypatch):
-    """Two requests per ZIP, for a value that never changes."""
+    """Three requests per ZIP, for a value that never changes."""
     calls = []
 
     class Resp:
@@ -90,17 +90,22 @@ def test_zone_resolution_is_cached(store, monkeypatch):
             return Resp({'places': [{'latitude': '42.99', 'longitude': '-71.46',
                                      'place name': 'Manchester',
                                      'state abbreviation': 'NH'}]})
+        if '/zones/county/' in url:
+            return Resp({'properties': {'name': 'Hillsborough', 'state': 'NH'}})
         return Resp({'properties': {'forecastZone': 'https://x/zones/forecast/NHZ012',
                                     'county': 'https://x/zones/county/NHC011',
-                                    'timeZone': 'America/New_York'}})
+                                    'timeZone': 'America/New_York',
+                                    'relativeLocation': {'properties': {
+                                        'city': 'Manchester', 'state': 'NH'}}}})
 
     monkeypatch.setattr(nws.requests, 'get', fake_get)
     first = nws.resolve_zip('03101')
     assert first['zone'] == 'NHZ012' and first['county'] == 'NHC011'
-    assert len(calls) == 2
+    assert first['county_label'] == 'Hillsborough County, NH'
+    assert len(calls) == 3
 
     nws.resolve_zip('03101')
-    assert len(calls) == 2, 'the cache was not used'
+    assert len(calls) == 3, 'the cache was not used'
 
 
 def test_both_forecast_and_county_zones_are_queried(store, monkeypatch):
@@ -183,15 +188,22 @@ def test_test_alerts_are_excluded_by_default(store, monkeypatch):
 
 # --- receipts -----------------------------------------------------------------
 
-def test_severe_alerts_print_larger_than_routine_ones():
-    """An Extreme alert should read from across the room; a routine advisory
-    should not cost a hand of paper."""
+def test_severe_alerts_print_longer_than_routine_ones():
+    """An Extreme alert carries its full description; a routine advisory does
+    not cost a hand of paper.
+
+    Note what is NOT asserted: that the routine one has a smaller title. Both
+    get the large headline -- an advisory you cannot read at a glance is not
+    much use either. Length is what varies.
+    """
     from taskhome import receipt
-    loud = nws.listener.receipt_blocks(alert('Tornado Warning', 'Extreme',
-                                             instruction='Take shelter.'))
-    quiet = nws.listener.receipt_blocks(alert())
+    loud = nws.listener.receipt_blocks(
+        alert('Tornado Warning', 'Extreme', instruction='Take shelter.',
+              description='A tornado was observed near Goffstown.'))
+    quiet = nws.listener.receipt_blocks(
+        alert(description='Winds 20 to 30 mph expected.'))
     assert receipt.height_mm(loud) > receipt.height_mm(quiet)
-    assert loud[0]['height'] == 2 and quiet[0]['height'] == 1
+    assert loud[0]['height'] == quiet[0]['height'] == 2
 
 
 def test_receipt_contains_the_essentials():
@@ -260,3 +272,148 @@ def test_a_broken_filter_fails_open(store, monkeypatch):
                         lambda self, c, i, now=None: 1 / 0)
     printed = run_with(monkeypatch, store, [alert('Tornado Warning', 'Extreme')])
     assert len(printed) == 1
+
+
+# --- county labelling ----------------------------------------------------------
+#
+# The API returns bare names -- 'Hillsborough', not 'Hillsborough County' --
+# and a bare name is genuinely ambiguous: Hillsborough is also a town in NH.
+# Appending "County" unconditionally is wrong in four different ways, each
+# verified against the live zone API.
+
+@pytest.mark.parametrize('name,state,expected', [
+    ('Hillsborough', 'NH', 'Hillsborough County, NH'),
+    ('Los Angeles', 'CA', 'Los Angeles County, CA'),
+    ('Orleans', 'LA', 'Orleans Parish, LA'),           # Louisiana has parishes
+    ('City of Alexandria', 'VA', 'City of Alexandria, VA'),   # already says City
+    ('Baltimore City', 'MD', 'Baltimore City, MD'),
+    ('Anchorage', 'AK', 'Anchorage, AK'),              # borough/municipality/census area
+    ('', 'NH', ''),
+])
+def test_county_label(name, state, expected):
+    assert nws.county_label(name, state) == expected
+
+
+def test_a_bare_county_name_is_never_printed_alone():
+    """The whole point of the change: 'Hillsborough, NH' could be the town."""
+    assert nws.county_label('Hillsborough', 'NH') != 'Hillsborough, NH'
+
+
+def test_area_line_names_the_place_the_zip_and_the_county():
+    resolved = {'zip': '03102', 'city': 'Manchester', 'state': 'NH',
+                'county_label': 'Hillsborough County, NH'}
+    line = nws.listener.area_label(
+        {'_zones': {'NHC011': resolved}, '_zones_exact': True})
+    assert line == 'Manchester (03102) - Hillsborough County, NH'
+
+
+def test_zips_sharing_a_county_are_grouped():
+    zones = {
+        'NHC011': {'zip': '03102', 'city': 'Manchester', 'county_label': 'Hillsborough County, NH'},
+        'NHZ012': {'zip': '03110', 'city': 'Bedford', 'county_label': 'Hillsborough County, NH'},
+    }
+    line = nws.listener.area_label({'_zones': zones, '_zones_exact': True})
+    assert line == 'Bedford (03110), Manchester (03102) - Hillsborough County, NH'
+    assert line.count('Hillsborough County') == 1, 'the county was repeated'
+
+
+def test_zips_in_different_counties_are_listed_separately():
+    zones = {
+        'a': {'zip': '03102', 'city': 'Manchester', 'county_label': 'Hillsborough County, NH'},
+        'b': {'zip': '03301', 'city': 'Concord', 'county_label': 'Merrimack County, NH'},
+    }
+    line = nws.listener.area_label({'_zones': zones, '_zones_exact': True})
+    assert 'Hillsborough County' in line and 'Merrimack County' in line
+
+
+def test_the_raw_nws_area_is_still_available_to_templates():
+    """Someone may want the authoritative text; it should not be lost."""
+    located = dict(alert(), _zones={'NHC011': {
+        'zip': '03102', 'city': 'Manchester',
+        'county_label': 'Hillsborough County, NH'}}, _zones_exact=True)
+    context = nws.listener.context(located)
+    assert context['area_nws'] == 'Hillsborough, NH'
+    assert context['area'] == 'Manchester (03102) - Hillsborough County, NH'
+
+
+def test_an_alert_only_claims_the_zips_it_actually_covers(store, monkeypatch):
+    """Attaching every configured zone made the receipt claim a tornado warning
+    for a ZIP three counties away that merely happened to be in the settings."""
+    monkeypatch.setattr(nws, 'resolve_zip', lambda z: {
+        '03102': {'zip': '03102', 'city': 'Manchester', 'zone': 'NHZ012',
+                  'county': 'NHC011', 'county_label': 'Hillsborough County, NH'},
+        '03301': {'zip': '03301', 'city': 'Concord', 'zone': 'NHZ008',
+                  'county': 'NHC013', 'county_label': 'Merrimack County, NH'},
+    }[z])
+
+    class Resp:
+        def raise_for_status(self): pass
+        def json(self):
+            return {'features': [{'properties': dict(
+                alert(), affectedZones=['https://api.weather.gov/zones/county/NHC011'])}]}
+
+    monkeypatch.setattr(nws.requests, 'get', lambda *a, **k: Resp())
+    alerts = nws.listener.poll(dict(nws.listener.config(),
+                                    zips=['03102', '03301']), None)
+    line = nws.listener.area_label(alerts[0])
+    assert 'Manchester' in line
+    assert 'Concord' not in line, 'claimed a ZIP the alert does not cover'
+
+
+def test_an_unmatched_alert_falls_back_to_the_nws_wording(store):
+    """Never overstate how precisely we know where an alert applies."""
+    line = nws.listener.area_label(
+        {'areaDesc': 'Coastal Rockingham, NH', '_zones': {'x': {'zip': '03102'}},
+         '_zones_exact': False})
+    assert line == 'Coastal Rockingham, NH'
+
+
+def test_a_failed_county_lookup_does_not_lose_the_alert(monkeypatch):
+    """A slightly less precise area line beats no weather alert."""
+    def boom(url, **kwargs):
+        raise RuntimeError('weather.gov down')
+    monkeypatch.setattr(nws.requests, 'get', boom)
+    name, state = nws._county_identity('NHC011', {}, 'NH')
+    assert name == '' and state == 'NH'
+
+
+def test_a_stale_cache_entry_is_re_resolved(store, monkeypatch):
+    """The zone cache has no TTL, so an old entry shape would persist forever."""
+    monkeypatch.setattr(nws, 'load_zone_cache',
+                        lambda: {'03102': {'zip': '03102', 'zone': 'NHZ012'}})
+    calls = []
+
+    class Resp:
+        def raise_for_status(self): pass
+        def json(self):
+            return {'places': [{'latitude': '1', 'longitude': '2',
+                                'place name': 'Manchester',
+                                'state abbreviation': 'NH'}],
+                    'properties': {'forecastZone': 'x/NHZ012',
+                                   'county': 'x/NHC011', 'name': 'Hillsborough',
+                                   'state': 'NH'}}
+
+    monkeypatch.setattr(nws.requests, 'get',
+                        lambda url, **k: calls.append(url) or Resp())
+    monkeypatch.setattr(nws, 'save_zone_cache', lambda c: True)
+    result = nws.resolve_zip('03102')
+    assert calls, 'a version-1 entry was used as-is'
+    assert result['cache_version'] == nws.CACHE_VERSION
+
+
+# --- layout presets ------------------------------------------------------------
+
+def test_the_title_is_large_in_every_preset_but_minimal():
+    """Title size and description are separate knobs. They used to be one
+    flag, so an advisory could not have a readable headline without also
+    printing 600 characters of forecast discussion."""
+    presets = dict(nws.listener.template_presets())
+    for name in ('nws-default', 'nws-compact'):
+        assert presets[name][0]['height'] == 2, f'{name} lost its large title'
+    assert presets['nws-minimal'][0]['height'] == 1
+
+
+def test_only_the_default_preset_carries_the_description():
+    presets = dict(nws.listener.template_presets())
+    assert '{description}' in str(presets['nws-default'])
+    assert '{description}' not in str(presets['nws-compact'])

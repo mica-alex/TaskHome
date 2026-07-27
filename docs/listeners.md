@@ -288,6 +288,33 @@ The result is cached in `data/cache/nws_zones.json` **without a TTL** — a ZIP'
 forecast zone does not move, and re-deriving it would cost two extra requests
 per ZIP on every poll. The file is safe to delete; it re-derives.
 
+### The area line
+
+`areaDesc` from the API is a bare county name — `Hillsborough, NH` — which is
+ambiguous, because Hillsborough is also a town in New Hampshire. That collision
+is common across most of the country, so the receipt builds its own line from
+the ZIPs that were actually configured:
+
+```
+Manchester (03102) - Hillsborough County, NH
+```
+
+Two details this needs:
+
+- **The right noun.** The zone API returns bare names, and "County" is wrong in
+  several states — Louisiana has parishes; Virginia and Maryland have
+  independent cities whose names already say so (`City of Alexandria`,
+  `Baltimore City`); Alaska mixes boroughs, municipalities and census areas, so
+  `county_label()` leaves those bare rather than guessing. Resolving the name
+  costs one extra request per ZIP, cached forever with the rest.
+- **Only the ZIPs the alert covers.** `affectedZones` is matched against the
+  configured zones, so a warning does not claim a ZIP three counties away that
+  merely happens to be in the settings. When no zone matches exactly the line
+  falls back to the NWS wording rather than overstating precision.
+
+ZIPs sharing a county are grouped under it; ZIPs in different counties are
+listed separately. The raw text stays available to templates as `{area_nws}`.
+
 ### Filtering
 
 `status != 'Actual'` is dropped unless `include_test` is on.
@@ -324,8 +351,14 @@ Two presets, both generated from `blocks_from_context()`:
 
 | Preset | For |
 | --- | --- |
-| `nws-default` | Warnings — double-width, double-height title, description included |
-| `nws-compact` | Advisories — single size, no description |
+| `nws-default` | Warnings — large title, full description |
+| `nws-compact` | Advisories — large title, no description |
+| `nws-minimal` | Single-size title, no description |
+
+Title size and description are separate knobs (`blocks_from_context(big_title=,
+description=)`). They used to be one "loud" flag, which meant an advisory could
+not have a readable headline without also printing 600 characters of forecast
+discussion.
 
 The per-event `style` column selects between them (and any template saved in
 the Studio). Left blank, an alert uses whichever template is active for the

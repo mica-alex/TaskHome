@@ -77,7 +77,8 @@ def test_presets_are_generated_from_the_printing_code():
     """Not duplicated. A preset that drifted from what actually prints would
     be worse than none, because it would look authoritative."""
     alert = dict(nws.listener.PLACEHOLDERS)
-    printed = nws.listener.blocks_from_context(alert, loud=True)
+    printed = nws.listener.blocks_from_context(
+        alert, big_title=True, description=True)
     preset = dict(nws.listener.template_presets())['nws-default']
     assert [b.get('type') for b in printed] == [b.get('type') for b in preset]
 
