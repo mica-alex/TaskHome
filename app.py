@@ -796,6 +796,13 @@ def print_task(task):
         return False
 
 
+def scf_has_video(issue):
+    """Whether an issue carries a video. The API exposes video_url alongside
+    the image fields; it was previously ignored entirely."""
+    media = issue.get('media')
+    return bool(isinstance(media, dict) and media.get('video_url'))
+
+
 def scf_has_media(issue):
     """Whether an issue carries a full-size image.
 

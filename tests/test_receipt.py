@@ -254,7 +254,7 @@ def test_no_information_is_lost_from_the_task_receipt():
 def test_no_information_is_lost_from_the_scf_receipt():
     rendered = '\n'.join(r.render_text(layouts.scf_receipt(ISSUE, **SCF)))
     for expected in ('Signal Repair', 'Lincoln St', 'Acknowledged',
-                     '5:58 PM', 'photo', 'Broken signal', '19840471'):
+                     '5:58 PM', 'Photo', 'Broken signal', '19840471'):
         assert expected in rendered, f'{expected!r} missing from the receipt'
 
 
@@ -332,3 +332,48 @@ def test_spacing_units_are_dots_not_180ths():
     requested spacing by 12%."""
     assert r.spacing_units(40) == 40
     assert r.spacing_units(56) == 56
+
+
+# --- wording and capitalisation ----------------------------------------------
+
+@pytest.mark.parametrize('recurring,expected', [
+    ('none', 'One-off'), ('daily', 'Daily'), ('every_weekday', 'Every weekday'),
+    ('first_day_month', 'First of month'), ('custom', 'Custom days'),
+])
+def test_recurrence_labels_read_as_english(recurring, expected):
+    """capitalize() produced 'Every_weekday' and 'First_day_month'."""
+    assert layouts.recurrence_label(recurring) == expected
+
+
+def test_unknown_recurrence_still_produces_something_readable():
+    assert layouts.recurrence_label('blue_moon') == 'Blue moon'
+
+
+@pytest.mark.parametrize('photo,video,expected', [
+    (True, False, 'Photo'),
+    (False, True, 'Video'),
+    (True, True, 'Photo & Video'),
+    (False, False, ''),
+])
+def test_media_labels(photo, video, expected):
+    assert layouts.media_label(photo, video) == expected
+
+
+def test_media_label_does_not_invent_a_count():
+    """The SCF v2 API exposes one representative image with no list and no
+    count, so any number would be a guess -- an issue may have several photos
+    and only one is visible to us."""
+    assert layouts.media_label(True, False) == 'Photo'
+    assert '1' not in layouts.media_label(True, True)
+
+
+def test_printed_is_capitalised_on_both_receipts():
+    task = '\n'.join(r.render_text(layouts.task_receipt(TASK, URL)))
+    scf = '\n'.join(r.render_text(layouts.scf_receipt(ISSUE, **SCF)))
+    assert 'Printed' in task and 'printed ' not in task
+    assert 'Printed' in scf and 'printed ' not in scf
+
+
+def test_video_only_issue_is_labelled():
+    blocks = layouts.scf_receipt(ISSUE, **dict(SCF, has_media=False), has_video=True)
+    assert 'Video' in '\n'.join(r.render_text(blocks))

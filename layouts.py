@@ -18,6 +18,40 @@ def _stamp(when=None):
     return (when or datetime.now()).strftime('%-I:%M %p %-m/%-d/%y')
 
 
+# Recurrence labels. `recurring.capitalize()` produced "Every_weekday" and
+# "First_day_month"; these read as English (MASTER_PLAN P2-10).
+RECURRENCE_LABELS = {
+    'none': 'One-off',
+    'daily': 'Daily',
+    'weekly': 'Weekly',
+    'monthly': 'Monthly',
+    'every_weekday': 'Every weekday',
+    'first_day_month': 'First of month',
+    'custom': 'Custom days',
+}
+
+
+def recurrence_label(recurring):
+    return RECURRENCE_LABELS.get(recurring) or str(recurring).replace('_', ' ').capitalize()
+
+
+def media_label(has_photo, has_video=False):
+    """Describe attached media without inventing a count.
+
+    The SCF v2 API exposes a single representative image and an optional
+    video URL -- there is no list and no count -- so "1 Photo" would be a
+    guess. An issue may well have several photos and we would only ever see
+    one of them. Naming the kind is the most we can honestly say.
+    """
+    if has_photo and has_video:
+        return 'Photo & Video'
+    if has_photo:
+        return 'Photo'
+    if has_video:
+        return 'Video'
+    return ''
+
+
 def _short_id(value):
     """First segment of a UUID. The full value is in the QR; a 36-character
     line of hex on a 48-column receipt is a whole wasted line for something
@@ -58,10 +92,10 @@ def task_receipt(task, qr_url, when=None):
     if extra:
         blocks.append(r.text(extra, font='a', width=1, height=1))
 
-    recurring = task.get('recurring', 'none')
-    kind = 'One-off' if recurring == 'none' else recurring.replace('_', ' ').capitalize()
-    blocks.append(r.text(f"{kind}  -  {_stamp(when)}  -  {_short_id(task.get('id', ''))}",
-                         font='b', width=1, height=1))
+    kind = recurrence_label(task.get('recurring', 'none'))
+    blocks.append(r.text(
+        f"{kind}  -  Printed {_stamp(when)}  -  {_short_id(task.get('id', ''))}",
+        font='b', width=1, height=1))
     return blocks
 
 
@@ -88,7 +122,7 @@ def legacy_task_receipt(task, qr_url, when=None):
 # --- SeeClickFix issues -------------------------------------------------------
 
 def scf_receipt(issue, category, address, reported_at, status, has_media,
-                description, when=None):
+                description, when=None, has_video=False):
     """Compact SCF issue.
 
     * The CODE39 barcode is gone. It cost roughly 10 mm — symbol plus its text
@@ -105,8 +139,9 @@ def scf_receipt(issue, category, address, reported_at, status, has_media,
     blocks.append(r.text(address, font='b', width=1, height=1))
 
     facts = f'{status}  -  {reported_at}'
-    if has_media:
-        facts += '  -  has photo'
+    media = media_label(has_media, has_video)
+    if media:
+        facts += f'  -  {media}'
     blocks.append(r.text(facts, font='b'))
 
     if description:
@@ -114,7 +149,7 @@ def scf_receipt(issue, category, address, reported_at, status, has_media,
         blocks.append(r.text(description, font='b', align='left'))
 
     blocks.append(r.rule())
-    blocks.append(r.text(f"#{issue.get('id', '?')}  -  printed {_stamp(when)}",
+    blocks.append(r.text(f"#{issue.get('id', '?')}  -  Printed {_stamp(when)}",
                          font='b'))
     return blocks
 
