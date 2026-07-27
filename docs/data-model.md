@@ -1,14 +1,33 @@
 # Data Model & Storage
 
-The datastore is four JSON files in the process working directory (paths are the
-bare constants at `app.py:23-26`, resolved relative to CWD — always run from the
-repo root). All four are gitignored and contain the user's real data.
+The datastore is four JSON files in **`data/`**, resolved relative to the repo
+root (the location of `app.py`), not the process working directory. Override
+with `TASKHOME_DATA_DIR` — which is what tests and any throwaway run should use.
 
-> **Planned change (not current behavior):** MASTER_PLAN `P1-9` relocates all
-> mutable state into a `data/` directory (`data/config.json`, …, plus
-> `data/styles/`, `data/cache/`, `data/push/`, `data/backups/` and a sibling
-> `logs/`), with an idempotent startup migration that moves root-level legacy
-> files. Until that lands, everything below describes the root-level layout.
+```
+data/config.json   data/tasks.json   data/history.json   data/listeners.json
+```
+
+All four are gitignored and contain the user's real data.
+
+### Migration from the old root-level layout
+
+TaskHome was historically run straight out of a git clone with these files in
+the repo root. On startup, `migrate_legacy_data_files()` moves any it finds
+there into `data/`, so existing installs keep working with no manual step. It
+is idempotent and runs before anything reads or writes.
+
+| Situation | Behavior |
+| --- | --- |
+| File only in the root | Moved into `data/` |
+| File only in `data/` | Left alone |
+| File in **both** | `data/` wins (it is what the app reads); the root copy is renamed `<name>.superseded-<timestamp>`, never deleted |
+| Data dir not creatable (read-only FS) | Logged; the app continues against the legacy location rather than refusing to start |
+| Move fails (cross-device) | Falls back to copy-then-remove, so the source survives until the copy lands |
+| Any single file fails | The others still migrate; failures are logged individually |
+
+A `DATA_MOVED.txt` breadcrumb is left in the root after a migration. It is
+purely informational and can be deleted.
 
 ## Write safety
 

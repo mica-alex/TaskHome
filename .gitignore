@@ -1,9 +1,15 @@
 # Runtime state -- contains real user data. Never commit.
+# Since P1-9 this lives in data/; the root-level entries below cover installs
+# that predate the move, and the migration breadcrumb it leaves behind.
+/data/
 /config.json
 /history.json
 /listeners.json
 /tasks.json
+/*.superseded-*
+/DATA_MOVED.txt
 /app.log
+/logs/
 
 # Agent working notes and plans.
 /docs/agent-plans/

@@ -16,6 +16,30 @@ import pytest  # noqa: E402
 
 import app as taskhome  # noqa: E402
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+REAL_STATE_FILES = [REPO_ROOT / name for name in
+                    ('config.json', 'tasks.json', 'history.json', 'listeners.json')]
+
+
+@pytest.fixture(autouse=True)
+def never_touch_real_data():
+    """Fail loudly if any test modifies the user's live JSON files.
+
+    This is a backstop, not a nicety: a real tasks.json was destroyed during
+    development by running code that wrote to the repo root. Tests are the most
+    likely place for that to happen again, so the suite checks itself.
+    """
+    def snapshot():
+        return {p: (p.read_bytes() if p.exists() else None) for p in REAL_STATE_FILES}
+
+    before = snapshot()
+    yield
+    after = snapshot()
+    changed = [p.name for p in REAL_STATE_FILES if before[p] != after[p]]
+    assert not changed, (
+        f"test modified real data files: {changed}. "
+        f"Point DATA_DIR/APP_ROOT at tmp_path instead.")
+
 
 class PrintLog(list):
     """Records what would have been printed, and can simulate an offline

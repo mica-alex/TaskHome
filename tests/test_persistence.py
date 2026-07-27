@@ -17,7 +17,14 @@ import app as taskhome
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
-    """Point every store at a temp directory and reset load state."""
+    """Point every store at a temp directory and reset load state.
+
+    APP_ROOT and DATA_DIR are redirected too, not just the file constants:
+    load_data() runs the legacy migration, which would otherwise operate on the
+    real repo root and move the user's actual JSON files.
+    """
+    monkeypatch.setattr(taskhome, 'APP_ROOT', str(tmp_path / 'repo'))
+    monkeypatch.setattr(taskhome, 'DATA_DIR', str(tmp_path))
     monkeypatch.setattr(taskhome, 'CONFIG_FILE', str(tmp_path / 'config.json'))
     monkeypatch.setattr(taskhome, 'TASKS_FILE', str(tmp_path / 'tasks.json'))
     monkeypatch.setattr(taskhome, 'HISTORY_FILE', str(tmp_path / 'history.json'))

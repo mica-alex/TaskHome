@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -22,10 +23,29 @@ DEFAULT_HOST = '0.0.0.0'
 DEFAULT_PORT = 5000
 VID = 0x04b8
 PID = 0x0e27
-CONFIG_FILE = 'config.json'
-TASKS_FILE = 'tasks.json'
-HISTORY_FILE = 'history.json'
-LISTENERS_FILE = 'listeners.json'  # New file for listener configs
+# Where mutable state lives (P1-9). Anchored to the repo root rather than the
+# process CWD, so TaskHome no longer has to be started from a particular
+# directory to find its own data. TASKHOME_DATA_DIR overrides it -- tests and
+# any throwaway run should set it rather than pointing at the real files.
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.environ.get('TASKHOME_DATA_DIR') or os.path.join(APP_ROOT, 'data')
+
+STORE_FILENAMES = {
+    'config': 'config.json',
+    'tasks': 'tasks.json',
+    'history': 'history.json',
+    'listeners': 'listeners.json',
+}
+
+
+def data_path(filename):
+    return os.path.join(DATA_DIR, filename)
+
+
+CONFIG_FILE = data_path('config.json')
+TASKS_FILE = data_path('tasks.json')
+HISTORY_FILE = data_path('history.json')
+LISTENERS_FILE = data_path('listeners.json')  # New file for listener configs
 
 # Catch-up policy (P1-10): what happens to occurrences that came due while
 # TaskHome was down. Resolution order is per-task 'catchup', then
@@ -60,6 +80,89 @@ listeners = {}  # New: e.g., {'scf': {'enabled': False, 'request_types': '6632,6
 _load_failed = set()
 
 
+def migrate_legacy_data_files(legacy_dir=None, data_dir=None):
+    """Move root-level JSON state into data/ (P1-9).
+
+    TaskHome has historically been run straight out of a git clone with its
+    four JSON files in the repo root, so existing installs must keep working
+    across this change without anyone having to move files by hand.
+
+    Idempotent. Returns a list of human-readable actions taken.
+
+    Deliberate choices about the awkward cases:
+      * Each file moves independently, so a failure part-way leaves the rest
+        correct rather than half-migrated in an unpredictable way.
+      * If a file exists in BOTH places we do not guess which is current. The
+        data/ copy wins (it is what the app will read) and the legacy file is
+        renamed aside rather than deleted, so nothing is destroyed.
+      * A read-only or unwritable filesystem is reported and the app continues
+        against the legacy location instead of refusing to start.
+      * os.replace is atomic within a filesystem; a cross-device move falls
+        back to copy-then-remove, which keeps the source until the copy lands.
+    """
+    legacy_dir = legacy_dir or APP_ROOT
+    data_dir = data_dir or DATA_DIR
+    actions = []
+
+    pending = [
+        (name, os.path.join(legacy_dir, filename), os.path.join(data_dir, filename))
+        for name, filename in STORE_FILENAMES.items()
+    ]
+    if not any(os.path.exists(legacy) for _, legacy, _ in pending):
+        return actions  # nothing to migrate; the common case after first run
+
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+    except OSError as e:
+        app.logger.error(
+            f"Cannot create {data_dir}: {e}. Continuing with the legacy "
+            f"location; state will stay in {legacy_dir}.")
+        return actions
+
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    for name, legacy, target in pending:
+        if not os.path.exists(legacy):
+            continue
+        if os.path.exists(target):
+            aside = f"{legacy}.superseded-{stamp}"
+            try:
+                os.replace(legacy, aside)
+                actions.append(f"{name}: kept data/ copy, moved legacy file to {aside}")
+                app.logger.warning(
+                    f"{name} exists in both {legacy_dir} and {data_dir}. Using the "
+                    f"data/ copy; the old one is preserved at {aside}.")
+            except OSError as e:
+                app.logger.error(f"Could not set aside legacy {name}: {e}")
+            continue
+        try:
+            os.replace(legacy, target)
+            actions.append(f"{name}: moved into {data_dir}")
+        except OSError:
+            # Different filesystem, or replace unsupported. Copy first, and
+            # only unlink the source once the copy is safely in place.
+            try:
+                shutil.copy2(legacy, target)
+                os.unlink(legacy)
+                actions.append(f"{name}: copied into {data_dir}")
+            except OSError as e:
+                app.logger.error(
+                    f"Failed to migrate {name} from {legacy} to {target}: {e}")
+
+    if actions:
+        app.logger.warning(
+            f"Migrated state into {data_dir} (P1-9): " + '; '.join(actions))
+        try:
+            with open(os.path.join(legacy_dir, 'DATA_MOVED.txt'), 'w') as f:
+                f.write(
+                    "TaskHome state moved to the data/ directory.\n\n"
+                    f"Migrated {stamp}. Files now live in:\n  {data_dir}\n\n"
+                    "This file is only a breadcrumb and can be deleted.\n"
+                    "Set TASKHOME_DATA_DIR to use a different location.\n")
+        except OSError:
+            pass  # breadcrumb is a nicety, never a failure
+    return actions
+
+
 def _load_json_file(name, path, default):
     """Load one JSON file. Returns (value, ok).
 
@@ -86,6 +189,13 @@ def load_data():
     global config, tasks, history, listeners
     app.logger.debug("Entering load_data")
     _load_failed.clear()
+
+    # Must run before anything reads or writes: it decides where the files are.
+    migrate_legacy_data_files()
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except OSError as e:
+        app.logger.error(f"Cannot create data directory {DATA_DIR}: {e}")
 
     loaded_config, ok = _load_json_file('config', os.path.abspath(CONFIG_FILE), None)
     if ok and loaded_config is not None:

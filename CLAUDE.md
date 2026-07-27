@@ -47,7 +47,7 @@ Everything lives in `app.py` (~1252 lines):
   - A store that failed to load is never written to.
   - Skipped/disabled tasks stay visible in the UI with a reason.
 - `load_data()` performs implicit migrations on load: adds `enabled: true` to tasks, `type: 'task'` to old history records, converts theme `high-contrast` → `system`, and creates a default `listeners.json` if missing.
-- Data file paths are relative to the process CWD — always run from the repo root. (Planned, not yet current: MASTER_PLAN `P1-9` moves all state into `data/` with a startup migration — until that lands, the four JSON files live in the repo root.)
+- State lives in **`data/`**, resolved from the repo root (not CWD), overridable with `TASKHOME_DATA_DIR`. A startup migration moves legacy root-level files in automatically and is idempotent. **Set `TASKHOME_DATA_DIR` for any experimental run** rather than letting it touch `data/`.
 - `app.log` is vestigial (empty): no file handler is configured; logs go to the console at DEBUG level (`P1-5` adds rotation).
 - Git identity: this repo commits as `mica-alex <83238954+mica-alex@users.noreply.github.com>` (already set locally). Match existing commit style: short imperative subjects.
 - `docs/agent-plans/` is gitignored (agent working documents, not project source).
