@@ -84,7 +84,20 @@ forever.
 
 ## Steady-state firing (every 60s)
 
-The tick order is `queue.drain()` → `run_due_tasks()` → `scf.poll_scf_listener()` → `listener_base.run_all()`. Draining first means a backlog clears in order rather than newest-first.
+The tick, in order:
+
+1. **`queue.drain()`** — first, so a backlog clears in order. Draining last
+   would print a long outage newest-first.
+2. **`run_due_tasks(now)`** — naive local wall-clock.
+3. **Push-listener connect** — any listener with `accepts_push` and an
+   `ensure_connected()` is (re)connected here. Driven from the tick rather
+   than at import because it doubles as the reconnect path, and because a dev
+   server started without a scheduler should hold no broker connection.
+4. **`scf.poll_scf_listener(now_utc)`** — aware UTC.
+5. **`listener_base.run_all(now_utc)`** — every registered listener.
+
+Each task has its own `try`, so one malformed task cannot stall the rest of the
+tick (`P0-6`); `run_all` isolates each listener for the same reason.
 
 `run_due_tasks(now)` compares `next_time <= now`, both naive local, then:
 

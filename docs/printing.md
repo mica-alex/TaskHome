@@ -154,3 +154,54 @@ a double click cannot emit two receipts.
   every call produces physical output.
 - History is the only record of what printed; do not clear or truncate it
   while testing.
+
+## One receipt at a time (P5-2 #9)
+
+`printing.PRINT_LOCK` serialises `print_blocks` across threads. Several can
+print now: the scheduler (due tasks and the queue drain), a web request (test
+print, reprint, "print now", a checklist), and a push listener's own network
+thread — MQTT delivers on paho's loop thread.
+
+Two of them opening the same USB device at once produces interleaved bytes —
+half of one receipt inside another — or a claim failure that leaks the
+interface (`P0-11`). The lock is held for a **whole receipt**, because a
+receipt is the atomic unit here: waiting a few seconds behind another print is
+fine, sharing paper with it is not.
+
+## Images (P4-7)
+
+`taskhome/images.py` fetches and prepares photos for the printer. Off by
+default: a photo roughly doubles the paper for an SCF issue (59 mm → 108 mm).
+
+A thermal printer has one ink level, so a photograph must become pure black and
+white, and **how** that reduction is done is the whole difference between a
+recognisable picture and a black smear:
+
+- **Floyd–Steinberg error diffusion**, not thresholding. It trades spatial
+  resolution for apparent grey and keeps a scene legible at 203 dpi.
+- **EXIF orientation is applied** — a phone photo is usually stored rotated
+  with a tag saying which way is up, and ignoring it prints the picture
+  sideways.
+- Scaled to fit, never cropped: a cropped photo of a pothole may not contain
+  the pothole.
+
+Everything on that path is defensive, because it runs against a URL from a
+third-party API: capped at 2 MB and 5 seconds, streamed and counted rather
+than trusting `Content-Length`, throttled so a catch-up burst does not fire
+twenty downloads at someone else's CDN, cached under `data/cache/media/`
+because the queue may retry a receipt, and pruned so a year of potholes cannot
+fill a disk. **Every failure returns None** and prints `[Photo unavailable]` —
+a receipt missing its photo is a good outcome; a receipt that failed to print
+because a CDN was down is not.
+
+`image` is a template block type, so placement is editable in the Studio.
+`{media_url}` is empty both when an issue has no photo and when photos are
+switched off, and `fill()` drops the block, so neither case leaves a gap.
+
+## Column alignment
+
+`receipt.wrap()` preserves runs of spaces and leading indentation. It used to
+join words with a single space and strip the result, which silently collapsed
+both — and since text is pre-wrapped before reaching the device, that meant the
+printer could not receive an aligned column layout at all. A departure board is
+columns; so is any `label     value` line.

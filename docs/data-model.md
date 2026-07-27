@@ -1,254 +1,230 @@
 # Data Model & Storage
 
-The datastore is four JSON files in **`data/`**, resolved relative to the repo
-root (the location of `app.py`), not the process working directory. Override
-with `TASKHOME_DATA_DIR` — which is what tests and any throwaway run should use.
+The datastore is **SQLite**, in `data/taskhome.db`. `sqlite3` is in the Python
+standard library, so this adds nothing anyone has to install.
+
+`data/` is resolved relative to the repo root, not the process working
+directory. Override with `TASKHOME_DATA_DIR` or `taskhome --data-dir` — which
+is what tests and any throwaway run should use. An override means *the data
+lives here*, never *go and fetch it from the repo root*.
+
+Before `P1-2` this was four JSON files. On any install that predates the
+migration they survive as `*.imported-<timestamp>` — never deleted, so a bad
+migration is recoverable by hand.
 
 ```
-data/config.json   data/tasks.json   data/history.json   data/listeners.json
+data/
+  taskhome.db              the datastore
+  taskhome.db-wal          write-ahead log; normal, do not delete while running
+  taskhome.db-shm          shared-memory index; likewise
+  backups/                 pre-image snapshots (P6-2)
+  cache/                   derived data, safe to delete at any time
+    scf_request_types.json SeeClickFix category names
+    nws_zones.json         ZIP -> forecast zone
+    media/                 dithered SeeClickFix photos
+  styles/<kind>/*.json     user-edited receipt templates
+  *.json.imported-<stamp>  the pre-SQLite datastore, kept
 ```
 
-All four are gitignored and contain the user's real data.
+Everything here is gitignored and contains the user's real data.
 
-### Migration from the old root-level layout
+## Schema
 
-TaskHome was historically run straight out of a git clone with these files in
-the repo root. On startup, `migrate_legacy_data_files()` moves any it finds
-there into `data/`, so existing installs keep working with no manual step. It
-is idempotent and runs before anything reads or writes.
+Deliberately under-normalised. `tasks` and `history` get real tables because
+they are queried; everything else is read and written whole, so columns would
+buy nothing.
 
-| Situation | Behavior |
-| --- | --- |
-| File only in the root | Moved into `data/` |
-| File only in `data/` | Left alone |
-| File in **both** | `data/` wins (it is what the app reads); the root copy is renamed `<name>.superseded-<timestamp>`, never deleted |
-| Data dir not creatable (read-only FS) | Logged; the app continues against the legacy location rather than refusing to start |
-| Move fails (cross-device) | Falls back to copy-then-remove, so the source survives until the copy lands |
-| Any single file fails | The others still migrate; failures are logged individually |
+```sql
+CREATE TABLE meta    (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE kv      (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE tasks   (id TEXT PRIMARY KEY, position INTEGER, payload TEXT);
+CREATE TABLE history (rowid INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE,
+                      type TEXT NOT NULL, print_time TEXT NOT NULL,
+                      payload TEXT NOT NULL);
+CREATE INDEX history_time ON history(print_time DESC);
+CREATE INDEX history_type ON history(type);
+```
 
-A `DATA_MOVED.txt` breadcrumb is left in the root after a migration. It is
-purely informational and can be deleted.
+`kv` holds `config`, `listeners`, `queue`, `lists` and `chores` as JSON blobs.
 
-## Write safety
+WAL mode is on, so readers do not block the writer — which matters because the
+scheduler writes while a page is being served. `taskhome/db.py` keeps one
+connection **per thread**, since a `sqlite3` connection is not safe to share
+and this app has several: the scheduler, request handlers, and a push
+listener's own network thread.
 
-Writes go through `_save_json_file()`: write to a temp file in the same
-directory, `fsync`, then `os.replace()`. Rename is atomic, so a reader or a
-crash sees either the whole old file or the whole new one — never a truncated
-one.
+History has its own table because it is append-heavy and query-shaped: adding
+one receipt used to rewrite the entire file.
 
-Loads are per-store. A file that is **missing** is fine and yields defaults. A
-file that **exists but will not parse** marks that store failed, and every
-subsequent save to it is refused with a loud log line until the file is fixed
-and TaskHome restarts.
+## Access
 
-That refusal matters more than it looks. The original code wrapped the whole
-load in one `try/except`, so a parse error left the in-memory list empty, and
-the very next save wrote that empty list over the user's file — turning a
-hand-repairable JSON error into permanent data loss. This is not hypothetical:
-it destroyed a real `tasks.json` during development. See `P0-5`.
+Nothing outside `storage.py` and `db.py` touches the database. The rest of the
+app reads module-level state:
 
-### Locking
+| Name | Type | Holds |
+| --- | --- | --- |
+| `state.config` | dict | Settings, merged over `constants.DEFAULT_CONFIG` |
+| `state.tasks` | list | Every task, in order |
+| `state.history` | list | Print records, newest first, capped at `max_history` |
+| `state.listeners` | dict | Per-listener settings **and** runtime state |
 
-`STATE_LOCK` (an `RLock`) guards structural mutation and serialisation. It is
-reentrant because `record_history` holds it and calls `save_history()`, which
-acquires it again — a plain `Lock` deadlocks there.
+**Cross-module access goes through the module object** (`state.tasks`), never
+`from .state import tasks` — rebinding a name imported the second way is
+invisible to every other module.
 
-It is deliberately **not** held across printing or HTTP fetches, which take
-seconds and would stall every page load. It covers the operations that can
-corrupt state: append/remove/clear, and `json.dumps` reading a list another
-thread is mutating.
+`state.STATE_LOCK` guards mutation shared between threads, and mutations are
+made in place (`state.tasks[:] = remaining`, `del state.history[:]`) rather
+than by rebinding, for the same reason.
 
-Worth knowing before anyone decides it is redundant: on stock CPython 3.13 the
-GIL already makes individual list operations and C-level `json.dumps` atomic,
-so the races it prevents are not reachable today, and the test suite passes
-without it. It is kept because that atomicity is a CPython implementation
-detail rather than a language guarantee (free-threaded builds remove it), and
-because it makes compound read-modify-write sequences correct by construction.
-`tests/test_concurrency.py` records this in full.
-
-## config.json
+## Config
 
 ```json
 {"max_history": 500, "hostname": "localhost", "theme": "system",
- "app_name": "TaskHome"}
+ "app_name": "TaskHome", "catchup": {...}, "styles": {...},
+ "log_level": "INFO", "backups": {"keep": 20}, "host": "0.0.0.0", "port": 5000}
 ```
 
-| Key | Type | Meaning | Used at |
-| --- | --- | --- | --- |
-| `max_history` | int | History cap; history is truncated after every print and on settings save |
-| `hostname` | string | Host used to build the QR fallback URL on task receipts (`http://<hostname>:<port>/task_page#<id>`) |
-| `theme` | string | `system` \| `light` \| `dark` |
-| `host` | string | *Optional.* Bind address. Overridden by `TASKHOME_HOST`; defaults to `0.0.0.0` |
-| `port` | int | *Optional.* Listen port. Overridden by `TASKHOME_PORT`; defaults to `5000` |
-| `catchup` | object | *Optional.* Catch-up policy — see [scheduling.md](scheduling.md) |
+| Key | Meaning |
+| --- | --- |
+| `max_history` | Cap on print records |
+| `hostname` | Used to build QR links on receipts |
+| `theme` | `system`, `light` or `dark` |
+| `app_name` | Shown in the browser tab and the PWA manifest |
+| `catchup` | Policy for occurrences missed while down (`P1-10`) |
+| `styles` | `{kind: template_name}` — the active receipt template per kind |
+| `log_level`, `backups`, `host`, `port` | Operations; see operations.md |
 
-```jsonc
-"catchup": {
-  "policy":              "skip",        // recurring tasks
-  "oneoff_policy":       "print_once",  // recurring == "none"
-  "recent_window_hours": 6,             // for print_if_recent
-  "max_prints":          20             // cap for printing policies
-}
-```
+`load_data()` merges over `constants.DEFAULT_CONFIG`, so a partial config is
+safe and a new key gets its default without a migration (`P1-6`).
 
-`load_data()` **merges** the file over the in-code defaults rather than
-replacing them, so a `config.json` missing a key no longer breaks code that
-reads it. Previously a missing `hostname` made `print_task` raise before
-printing, and a missing `max_history` made the post-print truncation raise — so
-the receipt physically printed but was never recorded in history.
+## Records
 
-Invalid values degrade rather than crash: an unparseable port, a negative
-`max_prints`, or an unknown `catchup.policy` logs a warning and falls back to
-the default.
-
-## tasks.json
-
-A JSON array of task objects. Real example:
+### Task
 
 ```json
-[
-  {"id": "6ef1b365-8971-49d4-b1d0-705ddc446133", "title": "Play with Sara",
-   "next_time": "2025-08-26T21:00:00", "recurring": "daily", "enabled": true,
-   "extra": "MISS KITTY TIME"},
-  {"id": "517e6806-72a4-4355-a8b8-af42414b9dac", "title": "Take Medicine",
-   "next_time": "2025-08-27T12:00:00", "recurring": "daily", "enabled": true}
-]
+{"id": "uuid", "title": "Take Medicine", "next_time": "2026-03-01T09:00:00",
+ "recurring": "daily", "enabled": true,
+ "extra": "with water", "url": "https://…", "days": [0, 2, 4],
+ "catchup": "print_once",
+ "print_failures": 0, "last_print_failure": "…", "schedule_error": "…"}
 ```
 
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `id` | string (UUID4) | yes | Generated on add |
-| `title` | string | yes | Printed large/bold on the receipt |
-| `next_time` | string | yes | **Naive local** ISO 8601, no timezone suffix. Form input is parsed and re-serialised, so the stored value is canonical whatever the browser sends. Empty form value → now |
-| `recurring` | string | yes | `none` \| `daily` \| `weekly` \| `monthly` \| `every_weekday` \| `first_day_month` \| `custom` |
-| `enabled` | bool | yes (migrated in) | Disabled tasks are skipped by the scheduler. They remain **visible** in the UI with a status badge — hiding them made a missed one-off unrecoverable (`P0-13`) |
-| `extra` | string | no | Second line on receipt; key is absent (not empty) when unset |
-| `url` | string | no | Overrides the QR code target; absent when unset |
-| `days` | int array | only when `recurring == "custom"` | Weekdays, Python convention: 0=Mon … 6=Sun. Deduped and sorted. An empty list is rejected at ingress, since it yields a schedule that can never advance (`P0-2`) |
-| `catchup` | string | no | Per-task catch-up policy override; `"inherit"` (or absent) defers to config. See [scheduling.md](scheduling.md) |
+`next_time` is **naive local wall-clock**. `days` applies only to
+`recurring: "custom"`; without it the schedule can never advance (`P0-2`).
+`schedule_error` and `print_failures` are set by the scheduler and cleared by a
+successful edit or print — a task carrying either stays visible in the UI with
+a reason rather than silently vanishing (`P0-13`).
 
-### Scheduler-written fields
+`recurring` is one of `constants.RECURRENCE_MODES`: `none`, `daily`, `weekly`,
+`monthly`, `every_weekday`, `first_day_month`, `custom`.
 
-These are set by the scheduler, not the user, and are absent until something
-happens. They exist so that a task going quiet is never silent:
+### History
 
-| Field | Type | Meaning |
+Every record has `uid`, `type` and `print_time`. `uid` is assigned when written
+and **back-filled on load** for older records; it is what the reprint button
+addresses, because list position stops being an identity once the table is
+filtered or paged, and per-type ids collide across namespaces.
+
+`print_time` is naive local. Records are capped at `config.max_history`.
+
+| `type` | Written by | Notable fields |
 | --- | --- | --- |
-| `missed_count` | int | Cumulative occurrences skipped while TaskHome was down |
-| `last_missed_at` | string | The most recent skipped occurrence |
-| `missed` | bool | A one-off whose time passed unprinted. Also sets `enabled: false`, since it has no future occurrence and would otherwise fire immediately |
-| `schedule_error` | string | Why the task was disabled — an unadvanceable recurrence or an unparseable `next_time`. Cleared when the task is edited |
-| `print_failures` | int | Consecutive failed print attempts; cleared on success |
-| `last_print_failure` | string | Timestamp of the most recent failure |
+| `task` | `printing.print_task` | the whole task |
+| `scf` | `printing.print_scf_issue` | `category`, `address`, `status`, `has_media` |
+| `nws` | NOAA weather | `category` is the event, plus `severity` |
+| `feeds` | RSS digest | `description` holds the headlines |
+| `calendar` | Calendar agenda | `description` holds the events |
+| `brief` | Morning brief | `description` lists the sections |
+| `binday` | Bin day | `description` lists the bins |
+| `webhook` | Webhook | `category` is the source |
+| `mqtt` | MQTT | `category` is the topic |
+| `github` | GitHub | `category` is "kind — repo" |
+| `transit` | Transit | `category` is Departures or Alert |
+| `packages` | 17TRACK | `category` is the carrier |
+| `chores` | Chore charts | `title` is the person |
+| `list` | A printed checklist | `title` is the list name |
 
-One-off tasks (`recurring: "none"`) are **deleted from tasks.json** after a
-successful print; their record survives only in history. A one-off whose print
-*fails* is kept and retried, so an offline printer cannot silently consume it.
+The kinds offered in the UI come from `web/pagination.history_kinds()`, built
+from the listener registry — so a new listener is filterable and correctly
+badged without a template being touched.
 
-## history.json
+### Listener blob
 
-A JSON array, newest first, capped at `config['max_history']`. Contains two
-record shapes distinguished by `type`.
+`state.listeners[name]` mixes user settings with runtime state. Settings come
+from the listener's `CONFIG_SCHEMA`; runtime keys are written by
+`listeners/base.run` and are never user-edited:
 
-### `type: "task"` — a printed task
+`last_check`, `seen` (trimmed to 2000), `consecutive_failures`,
+`backoff_until`, `last_error`, plus per-listener extras such as `etags`,
+`known_feeds`, `validators`, `last_agenda`, `last_board`, `recent`.
 
-The full task object at print time, plus `print_time` and `type`
-(`app.py:222`). Real example:
+**A save merges rather than replaces**, because settings and runtime share the
+blob — a save that dropped the watermark would replay the entire backlog.
+
+### Queue job
 
 ```json
-{
-  "id": "5c1c7096-77d7-4e72-ae2e-de4ab7a097e5",
-  "title": "Test Task Print",
-  "extra": "This is a test print from TaskHome",
-  "url": "http://localhost:5000/task_page#test",
-  "next_time": "2025-08-26T09:36:53.841688",
-  "recurring": "none",
-  "enabled": true,
-  "print_time": "2025-08-26T09:36:54.106869",
-  "type": "task"
-}
+{"id": "uuid", "kind": "scf", "description": "…", "blocks": [...],
+ "history": {...}, "queued_at": "…Z", "attempts": 0,
+ "next_attempt": null, "last_error": null, "parked": false}
 ```
 
-- `print_time` is naive local ISO (`datetime.now().isoformat()`).
-- Optional task fields (`extra`, `url`, `days`) appear only if the task had them.
-- `/test_print` receipts land here too, indistinguishable from real tasks except
-  by their `Test Task Print` title.
+Holds **rendered blocks**, not a reference to the source. By the time a job
+drains, the task may have been edited or deleted; rendering at enqueue time
+freezes what was meant. The `history` record is attached but written only when
+the job genuinely prints.
 
-### `type: "scf"` — a printed SeeClickFix issue
-
-A **projection** of the API issue (not the raw payload), built at
-`app.py:284-295`. Real example:
+### Lists and chore charts
 
 ```json
-{
-  "type": "scf",
-  "id": 12345678,
-  "category": "Streetlight Out",
-  "summary": "Streetlight outage reported",
-  "address": "123 Main St, Springfield",
-  "reported_at": "2025-08-26T13:36:42Z",
-  "status": "Open",
-  "description": "The streetlight in front of my house is not working.",
-  "url": "https://seeclickfix.com/issues/12345678",
-  "print_time": "2025-08-26T09:36:42.921326"
-}
+{"id": "uuid", "name": "Groceries",
+ "items": [{"id": "…", "text": "Milk", "done": false}]}
+
+{"id": "uuid", "name": "Sara", "token": "…", "days": [0,1,2,3,4],
+ "chores": ["Feed the cat"], "completed": ["2026-07-27"]}
 ```
 
-- `id` is the SCF numeric issue id (an **int**, unlike task string UUIDs).
-- `reported_at` is the API's `created_at` verbatim. The live API emits offset
-  timestamps like `2026-07-23T18:53:48-04:00`; the test route emits `...Z`.
-- `category` is `request_type.title`, or `"Unknown Category"` if absent.
-- `print_time` is naive local, same as tasks.
-- There is **no dedup key usage**: nothing prevents the same SCF `id` appearing
-  multiple times in history (MASTER_PLAN `P0-7`).
+A chore `token` authorises `/c/<token>`; it is compared in constant time and
+can be rotated, which invalidates any chart already printed.
 
-## listeners.json
+## Two time frames, on purpose
 
-```json
-{"scf": {"enabled": true, "request_types": "6632,6634,6630,6628,20840",
-         "interval": 5, "last_check": "2025-08-26T13:35:21Z"}}
-```
+Task times and print history are **naive local wall-clock**; listener
+watermarks and queue timestamps are **aware UTC**. A chore reminder is a
+wall-clock time and a listener watermark is an instant — different kinds of
+value. Comparing across them does not raise, it is simply wrong by your UTC
+offset (`P0-3`). See [scheduling.md](scheduling.md).
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `enabled` | bool | Master switch for the SCF poll |
-| `request_types` | string | Comma-separated SCF request-type IDs, passed as the API's `request_types` param. Normalised on save (whitespace trimmed, empties dropped) but **not** validated against the API, and no friendly names are cached yet — MASTER_PLAN `P4-1`/`P4-2` |
-| `interval` | int | Minimum minutes between polls, 1–1440 (checked against `last_check`; the scheduler still ticks every 60s) |
-| `last_check` | string \| null | UTC `YYYY-MM-DDTHH:MM:SSZ`, taken **before** the fetch. Doubles as the `after` param of the next poll — see [listeners.md](listeners.md) |
+## Migrations on load
 
-Runtime state, written by the poller and not exposed in the form:
+`storage.load_data()` applies these every start, idempotently:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `seen` | int array | Recently printed issue ids, oldest first, trimmed to 2000. Makes the deliberately-overlapping poll windows harmless. An issue that failed to print is deliberately absent so it retries |
-| `consecutive_failures` | int | Failed fetches in a row; reset on success |
-| `backoff_until` | string | UTC instant before which polling is skipped. Exponential, capped at 60 minutes. Removed on success |
-| `last_error` | string | Most recent fetch error. Removed on success |
+1. **Legacy file move** (`P1-9`) — root-level JSON into `data/`.
+2. **SQLite import** (`P1-2`) — JSON into the database, from `data/` or the
+   old repo root. **All-or-nothing**: any parse failure discards the partial
+   database, leaves the JSON untouched, and retries next start. A half-migrated
+   database would exist, switch the backend over, read as empty, and let the
+   next save overwrite the only surviving copy.
+3. `enabled: true` added to tasks lacking it.
+4. `type: 'task'` added to old history records; `uid` back-filled and persisted.
+5. Theme `high-contrast` → `system` (`P0-16`).
+6. Default listener settings created if absent.
 
-If `listeners.json` is missing, `load_data()` creates it with defaults
-(`enabled: false`, `request_types: "6632,6634"`, `interval: 10`) — this is the
-only file it creates (`app.py:88-90`).
+## Invariants
 
-## Implicit migrations in `load_data()`
+- A store that failed to load is **never written to**. That is the `P0-5`
+  chain — bad parse, empty memory, save over it — and it holds across the
+  SQLite boundary too.
+- Writes are atomic: a transaction for the database, temp file plus `rename`
+  for the caches that are still files.
+- Backups are **pre-image** snapshots of what is about to be overwritten, named
+  with microsecond precision so ordering is lexicographic.
+- Nothing is deleted on migration — only renamed.
 
-Performed in memory on every load; only persisted when the next `save_*()`
-happens to run:
+## Backup and export
 
-| Migration | Where | Effect |
-| --- | --- | --- |
-| Theme `high-contrast` → `system` | `app.py:52-54` | Legacy theme value converted |
-| Task `enabled` default | `app.py:63-66` | Tasks missing `enabled` get `true` |
-| History `type` default | `app.py:75-77` | History records missing `type` get `"task"` (pre-SCF records) |
-| Default `listeners.json` | `app.py:83-90` | Created (and saved immediately) if the file is absent |
+`data/backups/` holds pre-image snapshots (`P6-2`), pruned to
+`config.backups.keep`. `scripts/backups.py` lists and restores them.
 
-## Consistency hazards (documented, not fixed)
-
-- No lock: the scheduler thread and request threads mutate the same lists and
-  call the same `save_*()` functions concurrently; interleaved writes can
-  corrupt a file (MASTER_PLAN `P0-5`).
-- `delete_task` and the settings "clear history" REBIND the globals
-  (`tasks = [...]`, `history = []`) while the scheduler may be iterating the old
-  object (`app.py:417-419,539-540`).
-- `history[:config['max_history']]` with `max_history <= 0` (settable via a
-  hand-edited config or a crafted POST; the form's `min="1"` is client-side
-  only) empties or mis-truncates history (MASTER_PLAN `P0-9`).
+`taskhome --export-json DIR` writes every store back out as JSON, so a backup
+stays readable without sqlite to hand.

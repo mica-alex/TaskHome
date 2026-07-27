@@ -1,158 +1,142 @@
 # HTTP Routes Reference
 
-All routes are unauthenticated and CSRF-unprotected. Form POST handlers mutate
-the global state, persist via `save_*()`, and redirect; the `/api/` routes
-return JSON; the two test-print routes signal outcome by status code.
+Generated against the live URL map, so it cannot drift silently — if a route is
+missing here, regenerate it rather than hand-editing.
 
-Two blueprints: `main` (`web/routes.py`) and `pwa` (`web/pwa.py`).
+All routes are unauthenticated and CSRF-unprotected, on the assumption of a
+trusted LAN. The one exception is `/c/<token>`, which carries its own secret
+because it is reached from a printed QR code.
+
+Three response conventions, by design rather than accident:
+
+* **Form POSTs** validate and redirect, returning `400` with `error.html` on
+  bad input. They keep working with JavaScript disabled.
+* **`/api/` routes** return `{"ok": true, "data": ...}` or
+  `{"ok": false, "error": "..."}`. The uniform envelope is what retired the
+  contract where a page sniffed HTML for the word "successful" (`P0-10`).
+* **`/test_print` and `/test_scf_print`** signal by status code (200/500/503),
+  which predates the API layer and is kept because `settings.html` reads it.
+
+Blueprints: `main` (`web/routes.py`), `api` (`web/api.py`), `health`
+(`web/health.py`), `pwa` (`web/pwa.py`).
 
 ### Pages
 
-| Route | Methods | Renders / Returns |
+| Route | Methods | Endpoint |
 | --- | --- | --- |
-| `/` | GET | `index.html` — printer status, tasks, recent history |
-| `/task_page` | GET | `tasks.html` — task CRUD, paged/filtered history |
-| `/edit_task/<task_id>` | GET, POST | `tasks.html` (edit context) / redirect |
-| `/settings` | GET, POST | `settings.html` / redirect |
-| `/settings/receipts` | GET | `receipt_studio.html` — live preview editor |
-| `/listener` | **GET** | `listener.html` — the listeners **index** |
-| `/listener/scf` | GET, POST | `listener_scf.html` / redirect |
-| `/listener/settings/<name>` | GET, POST | `listener_settings.html` — rendered from `CONFIG_SCHEMA`; 404 for an unregistered name |
-| `/queue` | GET | `queue.html` — the print queue |
+| `/` | GET | `main.index` |
+| `/chores` | GET | `main.chore_charts` |
+| `/edit_task/<task_id>` | GET, POST | `main.edit_task` |
+| `/listener` | GET | `main.listener` |
+| `/listener/scf` | GET, POST | `main.listener_scf` |
+| `/listener/settings/<name>` | GET, POST | `main.listener_settings` |
+| `/lists` | GET | `main.checklists` |
+| `/manifest.webmanifest` | GET | `pwa.manifest` |
+| `/queue` | GET | `main.print_queue` |
+| `/service-worker.js` | GET | `pwa.service_worker` |
+| `/settings` | GET, POST | `main.settings` |
+| `/settings/receipts` | GET | `main.receipt_studio` |
+| `/task_page` | GET | `main.task_page` |
 
 ### Form POSTs
 
-| Route | Methods | Returns |
+| Route | Methods | Endpoint |
 | --- | --- | --- |
-| `/add_task` | POST | redirect → `/task_page` |
-| `/delete_task` | POST | redirect → `/task_page` |
-| `/test_print` | POST | status code (200 / 500 / 503) |
-| `/test_scf_print` | POST | status code (200 / 500 / 503) |
+| `/add_task` | POST | `main.add_task` |
+| `/delete_task` | POST | `main.delete_task` |
+| `/test_print` | POST | `main.test_print` |
+| `/test_scf_print` | POST | `main.test_scf_print` |
 
-### JSON
+### Public links
 
-| Route | Methods | Purpose |
+| Route | Methods | Endpoint |
 | --- | --- | --- |
-| `/api/receipt/preview` | POST | Render a template to preview rows |
-| `/api/receipt/templates/<kind>` | POST | Create/update a template |
-| `/api/receipt/templates/<kind>/<name>` | DELETE | Delete a template |
-| `/api/receipt/activate/<kind>/<name>` | POST | Make a template active |
-| `/api/receipt/test_print/<kind>` | POST | Print a sample |
-| `/api/scf/browse` | GET | Request types available at a lat/lng |
-| `/api/scf/names` | POST | Resolve request-type ids to names |
-| `/api/queue/retry` | POST | Release parked jobs and drain |
-| `/api/queue/<job_id>` | DELETE | Discard one job, or all when `job_id == 'all'` |
+| `/c/<token>` | GET | `main.chore_done` |
 
-### PWA (`pwa` blueprint)
+### JSON API
 
-| Route | Methods | Purpose |
+| Route | Methods | Endpoint |
 | --- | --- | --- |
-| `/manifest.webmanifest` | GET | Web app manifest; `application/manifest+json` |
-| `/service-worker.js` | GET | Offline shell. Served from the **root** so its scope covers the app, and `no-cache` on itself so a stale copy cannot permanently stick |
+| `/api/chores` | POST | `api.create_person` |
+| `/api/chores/<person_id>` | DELETE, PATCH | `api.modify_person` |
+| `/api/chores/<person_id>/done` | DELETE, POST | `api.set_person_done` |
+| `/api/chores/<person_id>/print` | POST | `api.print_chore_chart` |
+| `/api/config` | GET | `api.get_config` |
+| `/api/health` | GET | `health.api_health` |
+| `/api/history` | GET | `api.list_history` |
+| `/api/history/reprint/<uid>` | POST | `main.api_history_reprint` |
+| `/api/inbound/<token>` | POST | `api.inbound` |
+| `/api/listeners` | GET | `api.list_listeners` |
+| `/api/listeners/<name>` | GET | `api.get_listener` |
+| `/api/listeners/<name>/poll` | POST | `main.api_listener_poll` |
+| `/api/lists` | GET | `api.get_lists` |
+| `/api/lists/<list_id>` | DELETE, PATCH | `api.modify_list` |
+| `/api/lists/<list_id>/clear` | POST | `api.clear_list_done` |
+| `/api/lists/<list_id>/items` | POST | `api.add_list_item` |
+| `/api/lists/<list_id>/items/<item_id>` | DELETE, PATCH | `api.modify_list_item` |
+| `/api/lists/<list_id>/print` | POST | `api.print_list` |
+| `/api/queue/<job_id>` | DELETE | `main.api_queue_discard` |
+| `/api/queue/retry` | POST | `main.api_queue_retry` |
+| `/api/receipt/activate/<kind>/<name>` | POST | `main.api_activate_template` |
+| `/api/receipt/preview` | POST | `main.api_receipt_preview` |
+| `/api/receipt/templates/<kind>` | POST | `main.api_save_template` |
+| `/api/receipt/templates/<kind>/<name>` | DELETE | `main.api_delete_template` |
+| `/api/receipt/test_print/<kind>` | POST | `main.api_template_test_print` |
+| `/api/scf/browse` | GET | `main.api_scf_browse` |
+| `/api/scf/names` | POST | `main.api_scf_names` |
+| `/api/scheduler` | GET | `api.scheduler_info` |
+| `/api/stats` | GET | `health.api_stats` |
+| `/api/status` | GET | `health.api_status` |
+| `/api/tasks` | GET | `api.list_tasks` |
+| `/api/tasks/<task_id>` | GET | `api.get_task` |
+| `/api/tasks/<task_id>/duplicate` | POST | `api.duplicate_task` |
+| `/api/tasks/<task_id>/print` | POST | `api.print_task_now` |
+| `/api/test_print` | POST | `api.test_print` |
+| `/api/webhook/token` | POST | `api.rotate_webhook_token` |
 
-## `GET /` — `index()`
 
-Probes the printer (`is_printer_connected()` — one `usb.core.find` per page
-load), passes `status`, `config`, **all** tasks, and `history[:5]` to
-`index.html`.
+## Notes on particular routes
 
-## `GET /task_page` — `task_page()`
+### `GET /` — `main.index`
 
-All tasks, plus **one page** of history. Filtering and paging are server-side,
-so the browser is never handed the whole list.
+Probes the printer (one `usb.core.find` per load), and passes tasks enriched by
+`api.task_view` so the page and the API cannot disagree about when a task last
+printed.
 
-| Query param | Meaning | Behaviour on bad input |
-| --- | --- | --- |
-| `page` | 1-based page number | Clamped into range — an out-of-range bookmark shows the last page, not a blank table |
-| `per_page` | 25 / 50 / 100 / 250 | Anything else falls back to 25 |
-| `q` | Free text; all terms must match | Searches title, extra, category, address, summary, description, status, id |
-| `type` | `task` or `scf` | Unknown values are ignored rather than matching nothing |
+### `POST /api/inbound/<token>` — the webhook
 
-Every pager link carries the current `q` and `type`, so paging never silently
-drops a search, and every view is bookmarkable. The dashboard's five-item list
-at `/` stays deliberately unpaginated.
+A wrong token returns **404, not 403**, so scanning cannot distinguish "no such
+endpoint" from "right endpoint, wrong secret". Rate limited per hour with a
+`429` and `Retry-After`; the limit exists for stuck loops, not attackers.
+Accepts JSON, a form, or bare text.
 
-Both pages render disabled tasks rather than filtering them out, with a status
-badge distinguishing *Missed*, *Error* and *Disabled*. Hiding them previously
-made a disabled task unreachable from the UI — including one the scheduler had
-disabled itself — so there was no way to re-enable it (`P0-13`).
+### `GET /c/<token>` — chore chart done-link
 
-## `/settings` — `settings()`
+Deliberately unauthenticated beyond the token: it is scanned from paper by a
+child on a home LAN. Marking done is idempotent and non-destructive. The path
+is short because it becomes a QR code, and every character adds modules.
 
-- GET: renders config form + printer info block (constants + live status probe).
-- POST with `clear_history`: empties history, saves, redirects. The button
-  confirms client-side first. Other form values in that submission are ignored.
-- POST otherwise: validates `max_history` (integer, 0–100000) and `theme`
-  (one of `system`/`light`/`dark`); a blank `hostname` falls back to the
-  default. Invalid input returns **400** with `error.html` rather than a 500.
+### `POST /api/history/reprint/<uid>`
 
-## `POST /test_print`, `POST /test_scf_print`
+Addressed by `uid`, not list position — position stops being an identity the
+moment the table is filtered, searched or paged — and not by the record's own
+id, because the record types draw ids from different namespaces and collide.
+Re-renders from today's active template rather than replaying stored blocks.
 
-Build a hardcoded sample payload and call the real print function — **real
-paper, real history record**.
+### `POST /api/tasks/<id>/print`
 
-Status codes are honest: `200` on success, `500` when the print failed, `503`
-when the printer is absent. `settings.html` decides its toast from `resp.ok`,
-having previously matched the body against the substring `"successful"` — which
-reported success unconditionally, since the print functions swallow their own
-exceptions (`P0-10`). Buttons disable in flight so a double click cannot emit
-two receipts.
+Prints **without advancing the schedule**. Printing one now is not the
+occurrence coming due, and advancing `next_time` would silently skip the real
+reminder.
 
-## `POST /add_task`, `POST /edit_task/<id>`
+### `GET /api/health` vs `GET /api/status`
 
-Both build the task through `task_from_form()`, which validates and raises
-`ValidationError` (→ 400 + `error.html`) rather than letting bad input reach the
-datastore:
+`/api/health` returns **503** when something needs a human, so a monitor does
+not have to parse the body. `/api/status` is always 200, because a status
+widget that vanishes when something is wrong is worse than useless. An
+unplugged printer is deliberately *not* unhealthy.
 
-| Field | Rule |
-| --- | --- |
-| `title` | Required, non-blank after stripping |
-| `recurring` | Must be one of the seven known modes |
-| `next_time` | Parsed and re-serialised; unparseable is rejected. Empty → now (add) or unchanged (edit) |
-| `days` | Integers 0–6, deduped and sorted. **Required and non-empty** when `recurring == 'custom'`, since an empty list yields a schedule that can never advance (`P0-2`) |
-| `enabled` | Checkbox presence |
-| `extra`, `url` | Optional; blank removes the key |
+### `POST /test_print`, `POST /test_scf_print`
 
-Edits validate against a **copy**, and the live task is only replaced once
-everything passes — a rejected edit leaves it untouched instead of
-half-applied. A successful edit also clears `schedule_error` and `missed`,
-since the user has just restated what the schedule should be.
-
-`GET /edit_task/<id>` renders `tasks.html` with an `edit_task` context that the
-template never uses — editing happens through the per-task modals on
-`/task_page`. This branch is effectively dead code.
-
-## `POST /delete_task`
-
-Consumes `id`. Missing id → 400; unknown id → 404. Mutates the task list in
-place rather than rebinding the global. No confirmation, no undo (history is
-unaffected).
-
-## `/listener/scf` — `listener_scf()`
-
-- GET: renders the form from `listeners.get('scf', {})`.
-- POST: validates `interval` (integer, 1–1440) and normalises `request_types`
-  (trims whitespace, drops empty entries). Preserves the existing `last_check`
-  via `listeners.get('scf') or {}` — indexing it directly raised `KeyError` →
-  500 on a fresh install (`P0-9`).
-
-## Error responses
-
-Validation failures render `error.html` with a message and a back link, at the
-appropriate 4xx status. This is deliberately plain: the submitted values are
-lost on the way there, which is why MASTER_PLAN `P2-4` replaces it with inline
-field errors and toasts once the `/api/` layer exists.
-
-## Template/front-end notes
-
-- Jinja autoescaping is on (Flask default) — user-entered titles are XSS-safe,
-  and `tests/test_routes.py` asserts it.
-- All front-end assets are **vendored** under `static/vendor/`; no page makes an
-  external request, so the UI works with no internet (`P0-15`).
-- Theme: the user's setting lives in `data-theme-mode` and the resolved theme in
-  `data-theme`, so OS light/dark flips are followed for the whole session. The
-  script runs in `<head>` before first paint, avoiding a flash of the wrong
-  theme (`P0-16`).
-- History listing quirk: for SCF rows both `index.html` and `tasks.html` render
-  `SCF: {{ item.category }} - {{ item.id }}` when `item.summary` exists — the id
-  appears where the summary was presumably intended (MASTER_PLAN `P2-10`).
+Report the real outcome (`P0-10`). Note that a *failed* test print still
+enqueues a durable job, so a 500 does not mean nothing will ever print.

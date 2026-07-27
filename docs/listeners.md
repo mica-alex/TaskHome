@@ -13,6 +13,8 @@ are two:
 | `binday` | Bin collection reminder | poll | `base.Listener` |
 | `github` | Releases, builds, issues, PRs | poll | `base.Listener` |
 | `transit` | Departures and service alerts | poll | `base.Listener` |
+| `chores` | Per-person morning charts | poll | `base.Listener` |
+| `packages` | Parcel status via 17TRACK | poll | `base.Listener` |
 | `webhook` | Anything that can POST | **push** | `base.Listener` |
 | `mqtt` | MQTT topics / Home Assistant | **push** | `base.Listener` (optional dep) |
 
@@ -702,3 +704,63 @@ There is **no search-by-name endpoint**. Categories are discovered by location
 through the report-a-problem form, `GET /api/v2/issues/new?lat=&lng=`, which
 lists everything reportable at a point — 37 for Manchester NH. The picker
 groups them by organization and filters client-side.
+
+## Chore charts (`listeners/chores.py`, `taskhome/chores.py`)
+
+A per-person checklist each morning, with a QR that marks the day done from a
+phone. Doing so feeds a streak counter onto the next chart — the paper is the
+prompt, the streak is the reason to keep going.
+
+Storage, streaks and the done-link live in `taskhome/chores.py`; the listener
+only decides when to print. Separate receipts per person: a shared sheet gets
+passed around and argued over, one with a name at the top is theirs.
+
+Three decisions worth knowing:
+
+- **The done-link needs no login.** A per-person token in a short `/c/<token>`
+  URL, scanned from paper by a child on a home LAN. Demanding a password there
+  means the feature is never used. Constant-time comparison, idempotent, and
+  rotatable — rotating invalidates any chart already on the fridge.
+- **A streak counts completed days, not chores.** Partial credit turns the
+  number into an average, which is neither motivating nor explainable.
+- **Not having done today does not break it** — the day is still in progress.
+  Only *scheduled* days count, so a weekday-only chart survives the weekend
+  rather than resetting every Monday.
+
+## Package tracking (`listeners/packages.py`)
+
+Parcel status changes via 17TRACK, which aggregates the carriers behind one API
+and one key. Carrier APIs are why this was last in the plan: each of the big
+four has its own contract and approval process, and scraping them is fragile
+and rude.
+
+**This is the one listener never exercised against its live API.** No key was
+available, so the request shapes and field names come from the published v2.2
+contract rather than from a response anyone has seen — unlike every other
+listener here, where they were verified by probing. The parsing is written
+defensively: every field access tolerates absence, and an unrecognised payload
+is logged whole rather than raising, because that log will be the only evidence
+on first real contact. Expect `_parse_track` to need adjusting.
+
+By default it prints on ready-for-pickup, undelivered, delivered and alert
+states, plus out-for-delivery — "in transit" fires on every scan between two
+cities, which is a receipt for nothing. A delivered parcel stops being tracked
+after a few days so quota is not spent on parcels already in the hallway.
+
+**The alternative needs no key and works today:** forward shipping emails to
+the webhook listener.
+
+## Checklists (`taskhome/lists.py`)
+
+Not a listener — nothing polls and nothing fires on a schedule — but it shares
+the print path. A list in the UI; **Print** produces a receipt of `[ ]` boxes
+to tick with a pen, which is the one thing paper does better than a phone.
+
+- **Printing does not clear the list.** A shopping list is mostly the same
+  things every week; clearing it would make it useless.
+- **Items keep insertion order** — usually the order of the aisles. Re-sorting
+  is actively unhelpful.
+- Ticked items are left off the paper by default: the point of printing is to
+  carry what is outstanding.
+- A failed print is queued. Someone pressed a button and is waiting for paper,
+  and unlike a task there is no schedule to retry from.

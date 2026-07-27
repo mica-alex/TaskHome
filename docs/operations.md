@@ -214,41 +214,91 @@ restore snapshots the current file first, so it is itself undoable.
 column ruler per font; the wrap point is the printer's width. Measured values
 for the unit in use are recorded in [printing.md](printing.md).
 
-## Data files & recovery
+## The datastore & recovery
 
-`config.json`, `tasks.json`, `history.json`, `listeners.json` live in the repo
-root, gitignored, and are the only persistent state. Schemas in
-[data-model.md](data-model.md).
+State lives in **`data/taskhome.db`** (SQLite), gitignored. Schema in
+[data-model.md](data-model.md). Caches under `data/cache/` are derived and safe
+to delete at any time.
 
-**Back them up** — pre-image backups are automatic (see above), but they live on the same disk, though
-the two mechanisms that turned a small problem into a large one are fixed:
-writes are atomic (temp file + fsync + rename), and a store that fails to load
-is **write-blocked**, so a corrupt-but-repairable file is never overwritten with
-defaults. Watch for `Refusing to save` in the log — it means a file needs
-attention and that store is frozen until you fix it and restart.
+**Back it up.** Pre-image backups are automatic (see above) but live on the
+same disk. `taskhome --export-json DIR` writes every store out as JSON, which
+is the form to keep somewhere else — it stays readable without sqlite to hand.
 
-Recovering from a bad JSON file:
+### The migration from JSON
 
-1. Stop the app first (the scheduler rewrites `tasks.json`/`listeners.json` on
-   its own).
-2. Validate: `python3 -m json.tool tasks.json`. A truncated file usually fails
-   at the very end — often repairable by closing brackets by hand.
-3. If unrepairable, restore from backup, or delete the file:
-   - `config.json` missing → in-code defaults are used. A *partial* file is
-     also safe now: `load_data()` merges it over the defaults rather than
-     replacing them.
-   - `listeners.json` missing → recreated with defaults (listener disabled).
-   - `tasks.json` / `history.json` missing → start empty.
-4. Restart and re-check `/settings` and `/listener` values.
+On the first start after upgrading, `load_data()` imports the JSON datastore —
+from `data/`, or from the repo root if that is where it still lives — and
+renames the originals `*.imported-<timestamp>`. **Nothing is deleted.**
 
-Sanity checks after any manual edit of `tasks.json`:
+It is **all-or-nothing**. If any file fails to parse, the partial database is
+discarded, the JSON is left exactly as it was, and TaskHome carries on reading
+JSON with that store write-blocked. The migration retries — and fails just as
+loudly — on every start until the file is fixed. A half-migrated database would
+otherwise exist, switch the backend over, read as empty, and let the next save
+overwrite the only surviving copy.
+
+Look for one of these in the log:
+
+```
+Migrating the JSON datastore at … into SQLite      # started
+Migration abandoned: tasks did not parse …          # nothing moved; fix and restart
+```
+
+### Recovering
+
+1. **Stop the app first.** The scheduler writes on its own.
+2. Check the database opens:
+   `sqlite3 data/taskhome.db 'PRAGMA integrity_check;'` — or without the
+   `sqlite3` CLI, `.venv/bin/python -m taskhome.cli --check`.
+3. If it is damaged, restore from `data/backups/` (`scripts/backups.py list`
+   and `restore`), or from a `--export-json` dump.
+4. If you have neither, the `*.imported-*` files from the migration are still
+   there. Rename one set back to `*.json`, move `taskhome.db*` aside, and start
+   — the migration will run again from the JSON.
+
+`taskhome.db-wal` and `taskhome.db-shm` are normal while running. Do not delete
+them under a live process; a clean shutdown folds the WAL back in.
+
+### Write-blocking
+
+A store that fails to load is **write-blocked**, so a corrupt-but-repairable
+store is never overwritten with defaults. Watch for `Refusing to save` in the
+log — that store is frozen until you fix it and restart. This holds for the
+database as it did for the JSON files.
+
+### Sanity checks after editing tasks by hand
 
 - Every `next_time` parses. A bad one no longer poisons the tick — the task is
   disabled with `schedule_error` recorded — but it stops firing until fixed.
-- Every `custom` task has a non-empty `days` list. An empty one is now rejected
-  at ingress and disabled at runtime rather than hanging the scheduler.
+- Every `custom` task has a non-empty `days` list. An empty one is rejected at
+  ingress and disabled at runtime rather than hanging the scheduler.
 - A one-off with `next_time` in the past is handled by the catch-up policy on
   next start; it no longer hangs anything.
+
+## The print queue
+
+`/queue` shows receipts that could not print. Jobs retry with backoff and are
+**parked** after `MAX_ATTEMPTS`, never dropped — a receipt that cannot print is
+something the owner needs to know about.
+
+- **Retry now** releases parked jobs and drains immediately.
+- **Discard** removes one job or all of them.
+- The queue drains at the top of every scheduler tick, in order. Draining stops
+  at the first failure, so a backlog never prints out of order.
+
+A *task* print that fails is deliberately **not** queued: the task stays due
+and retries, which is already durable. Queueing both would print the occurrence
+twice when the printer returned.
+
+## Optional extras
+
+Two listeners need something beyond the standard install:
+
+- **MQTT** needs an MQTT **broker** on your network (TaskHome subscribes; it
+  does not run one) plus `.venv/bin/pip install paho-mqtt`. If you have no
+  broker, the **webhook** listener does the same job with nothing to install.
+- **Package tracking** needs a 17TRACK API key. It is the one listener never
+  exercised against its live API — see [listeners.md](listeners.md).
 
 ## Known operational limits (honest posture)
 
