@@ -29,7 +29,10 @@
                         Save Settings
                         <i class="material-icons right">save</i>
                     </button>
-                    <button class="btn-flat waves-effect" type="submit" name="clear_history" aria-label="Clear task history">
+                    {# Irreversible and one click away from Save; confirm first. #}
+                    <button class="btn-flat waves-effect" type="submit" name="clear_history"
+                            aria-label="Clear task history"
+                            onclick="return confirm('Permanently delete all print history? This cannot be undone.');">
                         Clear History
                         <i class="material-icons right">delete_sweep</i>
                     </button>

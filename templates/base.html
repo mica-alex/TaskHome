@@ -1,28 +1,49 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ config.theme }}">
+{#
+  data-theme-mode is the user's *setting* (system|light|dark) and never
+  changes at runtime; data-theme is the *effective* theme actually applied.
+  Keeping them separate is what fixes P0-16: the old code overwrote
+  data-theme with a concrete value, after which its own `=== 'system'` test
+  could never match again and OS light/dark flips were ignored for the rest
+  of the session.
+#}
+<html lang="en" data-theme-mode="{{ config.theme }}" data-theme="{{ config.theme }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{% endblock %} - TaskHome</title>
-    <!-- Materialize CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
-    <!-- Material Icons -->
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <!-- Flatpickr for datetimepicker -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <!-- Vendored, not CDN: this is a LAN appliance and must work with no
+         internet connection (P0-15). See static/vendor/README.md. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/materialize.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/material-icons.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr.min.css') }}">
     <!-- Custom styles -->
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script>
-        // Handle system theme detection for 'system' mode
-        function applySystemTheme() {
-            if (document.documentElement.getAttribute('data-theme') === 'system') {
-                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+        (function () {
+            var root = document.documentElement;
+            var darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+            function applyTheme() {
+                var mode = root.getAttribute('data-theme-mode') || 'system';
+                var effective = mode === 'system' ? (darkQuery.matches ? 'dark' : 'light') : mode;
+                root.setAttribute('data-theme', effective);
             }
-        }
-        // Run on load and when system theme changes
-        window.addEventListener('load', applySystemTheme);
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applySystemTheme);
+
+            // Run immediately rather than on 'load': this script is in <head>,
+            // so applying the theme before first paint avoids the flash of the
+            // wrong theme that waiting for the load event caused.
+            applyTheme();
+
+            // Follow OS changes for the whole session. addEventListener on
+            // MediaQueryList is unsupported on older Safari, which needs the
+            // deprecated addListener.
+            if (darkQuery.addEventListener) {
+                darkQuery.addEventListener('change', applyTheme);
+            } else if (darkQuery.addListener) {
+                darkQuery.addListener(applyTheme);
+            }
+        })();
     </script>
 </head>
 <body>
@@ -44,10 +65,8 @@
         {% block content %}
         {% endblock %}
     </main>
-    <!-- Materialize JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
-    <!-- Flatpickr JS -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="{{ url_for('static', filename='vendor/materialize.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/flatpickr.min.js') }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Initialize modals

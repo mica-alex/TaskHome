@@ -99,8 +99,14 @@ label {
     color: var(--primary-text) !important;
 }
 
-select {
-    display: none !important; /* Hide native select until Materialize styles it */
+/* Hide the native <select> only once Materialize has actually wrapped it.
+   This used to be an unconditional `select { display: none }`, so if
+   Materialize failed to load -- which it does whenever the machine is offline,
+   the normal state for a LAN appliance -- every dropdown vanished and the app
+   became unusable (P0-15). Scoped to .select-wrapper, an uninitialised select
+   simply renders as a plain native dropdown. */
+.select-wrapper > select {
+    display: none !important;
 }
 
 .input-field > select + .select-wrapper {
