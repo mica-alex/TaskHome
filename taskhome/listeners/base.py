@@ -94,6 +94,41 @@ class Listener:
         """Oldest first, so a backlog prints in the order it happened."""
         return item.get('created_at') or ''
 
+    def receipt_blocks(self, item):
+        """Fallback layout, used when the listener has no template.
+
+        A listener that ships template presets normally does not need this to
+        be reachable, but it stays the definition of record: the presets are
+        generated from it, so the two cannot disagree.
+        """
+        raise NotImplementedError
+
+    def history_record(self, item):
+        """The record written to history once the receipt is out."""
+        raise NotImplementedError
+
+    def template_presets(self):
+        """[(name, blocks)] of shipped layouts, default first.
+
+        Blocks carry `{placeholder}` markers rather than real values, so the
+        Receipt Studio can render and edit them. Generated from the same code
+        that prints the fallback layout, so a preset cannot drift from what the
+        listener would otherwise emit.
+
+        Returning an empty list means "not editable in the Studio" -- which is
+        the right answer for a listener whose output is not really a receipt.
+        """
+        return [(f'{self.name}-default', self.receipt_blocks(self.PLACEHOLDERS))]
+
+    def template_name(self, config, item):
+        """Which template this particular item prints with, or None for
+        whichever is active for the kind.
+
+        This is how one listener prints a tornado warning large and a wind
+        advisory small without needing to be two listeners.
+        """
+        return None
+
     def describe(self, item):
         """A one-line summary for logs and the print queue."""
         return f'{self.title} {self.dedup_key(item)}'
@@ -153,6 +188,15 @@ class Listener:
         has useful rows before anything has been seen live.
         """
         return sorted((config.get(spec['key']) or {}).keys())
+
+    def matrix_column_options(self, spec, column):
+        """Options for a `select` column in a matrix.
+
+        A hook rather than a static list because some options are not knowable
+        when the schema is declared -- the set of receipt templates changes
+        whenever someone saves one in the Studio.
+        """
+        return column.get('options', [])
 
     def matrix_row_default(self, spec, row):
         """Values for a matrix row that has never been configured."""
@@ -374,8 +418,18 @@ def run(listener, now_utc, printer=None):
         suppressed, fresh = fresh[:-cap] if cap else fresh, fresh[-cap:] if cap else []
         log.warning(f"{listener.title}: capped at {cap}, suppressing {len(suppressed)}")
 
-    template = styles.get_template(listener.name, styles.active_template_name(listener.name)) \
-        if listener.name in styles.KINDS else None
+    # Which template this item prints with. A listener may vary it per item --
+    # NWS gives a tornado warning a different layout from a wind advisory --
+    # falling back to whichever template is active for the kind.
+    def template_for(item):
+        name = listener.template_name(config, item) or \
+            styles.active_template_name(listener.name)
+        try:
+            return styles.get_template(listener.name, name)
+        except Exception as e:
+            log.warning(f"{listener.title}: template {name!r} unusable ({e}); "
+                        f"falling back to the built-in layout")
+            return None
 
     printed = 0
     for item in fresh:
@@ -395,6 +449,7 @@ def run(listener, now_utc, printer=None):
             seen.append(listener.dedup_key(item))
             continue
 
+        template = template_for(item)
         blocks = (styles.fill(template, listener.context(item)) if template
                   else listener.receipt_blocks(item))
         if printing.print_blocks(blocks):

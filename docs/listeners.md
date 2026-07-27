@@ -238,10 +238,29 @@ own:
 - the **history type filter and badge label** (`web/pagination.py`), so a new
   listener is filterable and correctly labelled without touching a template.
 
-### Known gap
+### Receipts
 
-`styles.KINDS = ('task', 'scf')`, so a plugin listener falls back to its own
-`receipt_blocks()` and its receipts are **not** editable in the Receipt Studio.
+Every registered listener is an editable kind in the Receipt Studio
+(`styles.kinds()` is built from the registry). A listener supplies:
+
+- **`PLACEHOLDERS`** — the placeholder names its templates may use, with
+  realistic sample values. A template using anything else is refused at save
+  time rather than printing the literal `{typo}` on paper.
+- **`template_presets()`** → `[(name, blocks)]`, default first. Blocks carry
+  `{placeholder}` markers. **Generate these from the same code that prints the
+  fallback layout** — a preset that has drifted from what actually prints is
+  worse than no preset, because it looks authoritative.
+- **`template_name(config, item)`** — an optional per-item override. NWS
+  returns the `style` chosen for that alert type, which is how one listener
+  prints a tornado warning large and a wind advisory small.
+- **`matrix_column_options(spec, column)`** — for a `select` column whose
+  options are not knowable when the schema is declared. NWS's style column
+  lists whatever templates exist right now, including ones just saved in the
+  Studio.
+
+If a template is missing or unusable at print time the listener falls back to
+`receipt_blocks()` and logs it. A weather alert must not be lost because
+someone deleted a template.
 
 ## The NOAA weather listener (`listeners/nws.py`)
 
@@ -298,6 +317,19 @@ the listener, and it is tested as such. Quiet hours wrap past midnight
 
 `default_interval = 2` because alerts are time-critical;
 `max_prints_per_poll = 10`.
+
+### Receipt layouts
+
+Two presets, both generated from `blocks_from_context()`:
+
+| Preset | For |
+| --- | --- |
+| `nws-default` | Warnings — double-width, double-height title, description included |
+| `nws-compact` | Advisories — single size, no description |
+
+The per-event `style` column selects between them (and any template saved in
+the Studio). Left blank, an alert uses whichever template is active for the
+`nws` kind. `default_matrix_row()` seeds warnings to the large layout.
 
 ## Request-type names and discovery (P4-1/P4-2/P4-3)
 

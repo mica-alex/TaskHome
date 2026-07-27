@@ -166,7 +166,7 @@ before fixing bugs or adding features.
 | `taskhome/printing.py` | ESC/POS layer; `print_blocks` is the lowest level |
 | `taskhome/receipt.py` | Shared renderer: ESC/POS, ASCII and HTML from one block list |
 | `taskhome/layouts.py` | Receipt layouts as data |
-| `taskhome/styles.py` | User-editable receipt templates; `KINDS = ('task', 'scf')` |
+| `taskhome/styles.py` | User-editable receipt templates; kinds come from the registry |
 | `taskhome/settings.py`, `logsetup.py` | Port/host resolution; rotating log setup |
 | `taskhome/listeners/base.py` | Plugin interface: `CONFIG_SCHEMA`, `run()`, registry |
 | `taskhome/listeners/scf.py` | SeeClickFix — predates the interface, still bespoke |

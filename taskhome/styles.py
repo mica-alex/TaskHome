@@ -27,14 +27,33 @@ import re
 from . import constants, layouts, receipt, state, storage
 from .logsetup import log
 
-KINDS = ('task', 'scf')
+#: Receipt kinds that are not listeners. Everything else comes from the
+#: listener registry, so a new listener's receipts are editable in the Studio
+#: without touching this module (P3-5).
+BUILTIN_KINDS = ('task', 'scf')
+
+
+def kinds():
+    """Every editable receipt kind, built-ins first."""
+    from .listeners import base
+    return BUILTIN_KINDS + tuple(sorted(
+        name for name in base.registry() if name not in BUILTIN_KINDS))
+
+
+def kind_label(kind):
+    """Human name for a kind, for the Studio's tabs."""
+    from .listeners import base
+    listener = base.get(kind)
+    if listener is not None:
+        return listener.title
+    return {'task': 'Tasks', 'scf': 'SeeClickFix'}.get(kind, kind)
 STYLES_DIRNAME = 'styles'
 TEMPLATE_VERSION = 1
 
 #: Placeholders each kind offers, with a sample value used for previewing.
 #: Sample values are realistic rather than pretty -- a preview built on
 #: "Lorem ipsum" hides exactly the wrapping problems it should reveal.
-PLACEHOLDERS = {
+BUILTIN_PLACEHOLDERS = {
     'task': {
         'title': 'Play with Sara',
         'extra': 'MISS KITTY TIME',
@@ -57,6 +76,22 @@ PLACEHOLDERS = {
     },
 }
 
+
+def placeholders(kind):
+    """Placeholder names and sample values for a kind.
+
+    A listener supplies its own through the PLACEHOLDERS class attribute, which
+    is also what its receipt template is validated against -- so a typo'd
+    placeholder is refused at save time rather than rendering as literal text
+    on paper.
+    """
+    if kind in BUILTIN_PLACEHOLDERS:
+        return dict(BUILTIN_PLACEHOLDERS[kind])
+    from .listeners import base
+    listener = base.get(kind)
+    return dict(listener.PLACEHOLDERS) if listener is not None else {}
+
+
 _PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
 
 
@@ -71,12 +106,34 @@ def styles_dir(kind=None):
     return os.path.join(base, kind) if kind else base
 
 
-def builtin_template(kind):
-    """The shipped default, derived from layouts.py.
+def builtin_templates(kind):
+    """Every shipped preset for a kind, default first.
 
-    Generated rather than duplicated, so the built-in preset and the code that
-    actually prints cannot drift apart.
+    Generated rather than duplicated, so a preset and the code that actually
+    prints cannot drift apart. A listener may offer more than one -- NWS ships
+    a large layout for warnings and a compact one for advisories, which is what
+    the per-event `style` column selects between.
     """
+    from .listeners import base
+    listener = base.get(kind)
+    if listener is not None:
+        presets = listener.template_presets()
+        return [{'name': name, 'kind': kind, 'version': TEMPLATE_VERSION,
+                 'builtin': True, 'blocks': _generalise(blocks)}
+                for name, blocks in presets]
+    return [builtin_template(kind)]
+
+
+def builtin_template(kind, name=None):
+    """The shipped default for a kind, or a named preset."""
+    from .listeners import base
+    if base.get(kind) is not None:
+        presets = builtin_templates(kind)
+        for preset in presets:
+            if preset['name'] == name:
+                return preset
+        return presets[0]
+
     if kind == 'task':
         blocks = layouts.task_receipt(
             {'id': '{id}', 'title': '{title}', 'extra': '{extra}',
@@ -120,8 +177,8 @@ def _generalise(blocks):
 
 
 def list_templates(kind):
-    """Templates for a kind: the built-in preset first, then user ones."""
-    templates = [builtin_template(kind)]
+    """Templates for a kind: the built-in presets first, then user ones."""
+    templates = list(builtin_templates(kind))
     directory = styles_dir(kind)
     try:
         names = sorted(f for f in os.listdir(directory) if f.endswith('.json'))
@@ -148,6 +205,9 @@ def get_template(kind, name=None):
     """
     if not name or name == f'{kind}-default':
         return builtin_template(kind)
+    for preset in builtin_templates(kind):
+        if preset['name'] == name:
+            return preset
     for template in list_templates(kind):
         if template.get('name') == name:
             return template
@@ -171,7 +231,7 @@ def save_template(template):
 
 
 def delete_template(kind, name):
-    if name == f'{kind}-default':
+    if any(p['name'] == name for p in builtin_templates(kind)):
         raise TemplateError('The built-in template cannot be deleted.')
     path = os.path.join(styles_dir(kind), f'{name}.json')
     try:
@@ -213,7 +273,7 @@ def validate_template(template):
         raise TemplateError('A template must be an object.')
 
     kind = template.get('kind')
-    if kind not in KINDS:
+    if kind not in kinds():
         raise TemplateError(f"Unknown receipt kind {kind!r}.")
 
     name = str(template.get('name', '')).strip()
@@ -230,7 +290,7 @@ def validate_template(template):
     if len(blocks) > 60:
         raise TemplateError('A template may have at most 60 blocks.')
 
-    known = set(PLACEHOLDERS[kind])
+    known = set(placeholders(kind))
     clean = []
     for index, block in enumerate(blocks, start=1):
         clean.append(_validate_block(block, index, known))
@@ -324,7 +384,7 @@ def fill(template, context):
 
 
 def sample_context(kind, overrides=None):
-    context = dict(PLACEHOLDERS.get(kind, {}))
+    context = dict(placeholders(kind))
     if overrides:
         context.update({k: v for k, v in overrides.items() if v is not None})
     return context

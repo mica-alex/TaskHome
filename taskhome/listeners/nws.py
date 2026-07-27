@@ -165,6 +165,8 @@ class NWSListener(base.Listener):
                        {'key': 'print_cancels', 'label': 'Cancels', 'type': 'bool'},
                        {'key': 'quiet_hours', 'label': 'Quiet hours', 'type': 'select',
                         'options': ['respect', 'override', 'digest']},
+                       {'key': 'style', 'label': 'Receipt style', 'type': 'select',
+                        'options': [], 'dynamic': True},
                    ],
                    help='One row per alert type. Rows appear for anything seen '
                         'live, so the list grows to match your area.'),
@@ -334,6 +336,37 @@ class NWSListener(base.Listener):
             'printed': layouts._stamp(),
         }
 
+    def blocks_from_context(self, context, loud):
+        """The layout, over already-resolved values.
+
+        Split out from receipt_blocks so the Studio presets and the printed
+        fallback are generated from one definition -- a preset that drifted
+        from what actually prints would be worse than no preset at all, because
+        it would look authoritative.
+
+        `context` may hold real values or `{placeholder}` markers; the layout
+        does not care, which is what makes one function serve both.
+        """
+        blocks = [
+            receipt.text(context['event'], font='a', width=2 if loud else 1,
+                         height=2 if loud else 1, bold=True),
+            receipt.gap(6),
+            receipt.text(f"{context['severity']} - {context['urgency']}",
+                         font='b', bold=True),
+            receipt.text(context['area'], font='b'),
+            receipt.text(f"Until {context['expires']}", font='b'),
+        ]
+        if context.get('instruction'):
+            blocks.append(receipt.rule())
+            blocks.append(receipt.text(context['instruction'], font='b', align='left'))
+        if loud and context.get('description'):
+            blocks.append(receipt.rule())
+            blocks.append(receipt.text(str(context['description'])[:600],
+                                       font='b', align='left'))
+        blocks.append(receipt.rule())
+        blocks.append(receipt.text(f"NWS - Printed {context['printed']}", font='b'))
+        return blocks
+
     def receipt_blocks(self, alert):
         """Fallback layout when no template is configured.
 
@@ -341,26 +374,35 @@ class NWSListener(base.Listener):
         across the room, a routine advisory should not cost a hand of paper.
         """
         context = self.context(alert)
-        severity = context['severity']
-        loud = severity in ('Extreme', 'Severe')
+        return self.blocks_from_context(
+            context, loud=context['severity'] in ('Extreme', 'Severe'))
 
-        blocks = [
-            receipt.text(context['event'], font='a', width=2 if loud else 1,
-                         height=2 if loud else 1, bold=True),
-            receipt.gap(6),
-            receipt.text(f"{severity} - {context['urgency']}", font='b', bold=True),
-            receipt.text(context['area'], font='b'),
-            receipt.text(f"Until {context['expires']}", font='b'),
+    def template_presets(self):
+        """Two shipped layouts, because one size genuinely does not fit.
+
+        A tornado warning and a wind advisory are not the same kind of event,
+        and the per-event `style` column picks between these.
+        """
+        markers = {key: '{%s}' % key for key in self.PLACEHOLDERS}
+        return [
+            (f'{self.name}-default', self.blocks_from_context(markers, loud=True)),
+            (f'{self.name}-compact', self.blocks_from_context(markers, loud=False)),
         ]
-        if context['instruction']:
-            blocks.append(receipt.rule())
-            blocks.append(receipt.text(context['instruction'], font='b', align='left'))
-        if loud and context['description']:
-            blocks.append(receipt.rule())
-            blocks.append(receipt.text(context['description'][:600], font='b', align='left'))
-        blocks.append(receipt.rule())
-        blocks.append(receipt.text(f"NWS - Printed {context['printed']}", font='b'))
-        return blocks
+
+    def template_name(self, config, alert):
+        """The per-event style, so one listener covers both extremes."""
+        event = alert.get('event', '')
+        row = (config.get('events') or {}).get(event) or {}
+        return row.get('style') or None
+
+    def matrix_column_options(self, spec, column):
+        """The style column offers whatever templates exist right now,
+        including ones edited in the Studio -- a fixed list would go stale the
+        moment someone saved a new layout."""
+        if column['key'] != 'style':
+            return column.get('options', [])
+        from .. import styles
+        return [''] + [t['name'] for t in styles.list_templates(self.name)]
 
     def history_record(self, alert):
         context = self.context(alert)

@@ -376,7 +376,7 @@ def api_scf_names():
 @bp.route('/settings/receipts')
 def receipt_studio():
     kind = request.args.get('kind', 'task')
-    if kind not in styles.KINDS:
+    if kind not in styles.kinds():
         kind = 'task'
     name = request.args.get('name') or styles.active_template_name(kind)
     template = styles.get_template(kind, name)
@@ -384,11 +384,12 @@ def receipt_studio():
         'receipt_studio.html',
         config=state.config,
         kind=kind,
-        kinds=styles.KINDS,
+        kinds=styles.kinds(),
+        kind_label=styles.kind_label,
         template=template,
         templates=styles.list_templates(kind),
         active=styles.active_template_name(kind),
-        placeholders=sorted(styles.PLACEHOLDERS[kind]),
+        placeholders=sorted(styles.placeholders(kind)),
         preview=styles.preview(template),
     )
 
@@ -427,7 +428,7 @@ def api_save_template(kind):
 
 @bp.route('/api/receipt/activate/<kind>/<name>', methods=['POST'])
 def api_activate_template(kind, name):
-    if kind not in styles.KINDS:
+    if kind not in styles.kinds():
         return {'ok': False, 'error': 'Unknown receipt kind.'}, 400
     styles.set_active_template(kind, name)
     return {'ok': True, 'active': styles.active_template_name(kind)}
@@ -447,7 +448,7 @@ def api_delete_template(kind, name):
 @bp.route('/api/receipt/test_print/<kind>', methods=['POST'])
 def api_template_test_print(kind):
     """Print the template being edited. Emits real paper."""
-    if kind not in styles.KINDS:
+    if kind not in styles.kinds():
         return {'ok': False, 'error': 'Unknown receipt kind.'}, 400
     if not printing.is_printer_connected():
         return {'ok': False, 'error': 'Printer not connected.'}, 503

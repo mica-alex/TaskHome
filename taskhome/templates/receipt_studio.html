@@ -22,7 +22,9 @@
     {% for k in kinds %}
       <a class="mica-chip {{ 'mica-chip-accent' if k == kind }}"
          href="{{ url_for('main.receipt_studio', kind=k) }}">
-        {{ 'Task reminders' if k == 'task' else 'SeeClickFix issues' }}
+        {# Labels come from the registry, so a new listener gets a tab here
+           without this template being edited. #}
+        {{ kind_label(k) }}
       </a>
     {% endfor %}
     <span class="mica-help">Active: <strong>{{ active }}</strong></span>

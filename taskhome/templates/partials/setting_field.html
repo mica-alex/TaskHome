@@ -114,8 +114,11 @@
                       <select class="mica-input mica-input-compact"
                               name="{{ spec.key }}[{{ row }}][{{ column.key }}]"
                               aria-label="{{ column.label }} for {{ row }}">
-                        {% for option in column.options %}
-                          <option value="{{ option }}" {% if option == cv %}selected{% endif %}>{{ option }}</option>
+                        {# Options come from the listener, not the schema: the
+                           receipt-style column changes whenever a template is
+                           saved in the Studio. #}
+                        {% for option in listener.matrix_column_options(spec, column) %}
+                          <option value="{{ option }}" {% if option == cv %}selected{% endif %}>{{ option or 'Default' }}</option>
                         {% endfor %}
                       </select>
                     {% else %}
