@@ -727,6 +727,167 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
         return False
 
 
+SCF_ISSUES_URL = "https://seeclickfix.com/api/v2/issues"
+SCF_PER_PAGE = 100
+SCF_MAX_PAGES = 20          # 2000 issues per poll; a guard, not a real limit
+SCF_SEEN_LIMIT = 2000       # bounded dedup memory
+SCF_MAX_BACKOFF_MINUTES = 60
+
+
+def parse_utc(value, default=None):
+    """Parse an ISO 8601 timestamp to an aware UTC datetime, or return default."""
+    if not value:
+        return default
+    try:
+        parsed = parser.parse(str(value).strip())
+    except (ValueError, TypeError, OverflowError) as e:
+        app.logger.warning(f"Failed to parse timestamp {value!r}: {e}")
+        return default
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def fetch_scf_issues(request_types, after):
+    """Fetch every page of SCF issues created after `after`.
+
+    The old code requested one page of 100 and ignored
+    metadata.pagination entirely, so a busy interval silently dropped
+    everything past the first page (P0-7). Raises on transport/HTTP errors so
+    the caller can back off without advancing its watermark.
+    """
+    collected = []
+    page = 1
+    while page <= SCF_MAX_PAGES:
+        params = {
+            'status': 'open,acknowledged',
+            'request_types': request_types,
+            'after': after,
+            'per_page': str(SCF_PER_PAGE),
+            'page': str(page),
+        }
+        app.logger.info(f"Fetching SCF issues after {after}, page {page}")
+        resp = requests.get(SCF_ISSUES_URL, params=params, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+
+        issues = payload.get('issues') or []
+        collected.extend(issues)
+
+        pagination = (payload.get('metadata') or {}).get('pagination') or {}
+        total_pages = pagination.get('pages')
+        if total_pages is None:
+            # Fall back to "a short page means the last page".
+            if len(issues) < SCF_PER_PAGE:
+                break
+        elif page >= total_pages:
+            break
+        page += 1
+    else:
+        app.logger.warning(
+            f"SCF pagination hit the {SCF_MAX_PAGES}-page guard; "
+            f"some issues were not fetched this cycle")
+    return collected
+
+
+def scf_due(scf, now_utc):
+    """Whether the SCF listener should poll now."""
+    backoff_until = parse_utc(scf.get('backoff_until'))
+    if backoff_until and now_utc < backoff_until:
+        return False
+    last_check = parse_utc(scf.get('last_check'))
+    if last_check is None:
+        return True
+    try:
+        interval_minutes = int(scf.get('interval', 10))
+    except (TypeError, ValueError):
+        interval_minutes = 10
+    return (now_utc - last_check) >= timedelta(minutes=max(interval_minutes, 1))
+
+
+def poll_scf_listener(now_utc):
+    """Poll SeeClickFix and print new issues. Returns the number printed.
+
+    Fixes the three P0-7 defects together, because they interact:
+      * dedup by issue id, since `after` is inclusive and windows overlap
+      * follow pagination rather than silently truncating at 100
+      * take the watermark BEFORE the request, so issues created while the
+        request is in flight are caught next cycle instead of being skipped
+    """
+    scf = listeners.get('scf')
+    if not scf or not scf.get('enabled'):
+        return 0
+
+    request_types = (scf.get('request_types') or '').strip()
+    if not request_types:
+        app.logger.warning("SCF listener enabled but request_types empty; skipping check")
+        return 0
+
+    if not scf_due(scf, now_utc):
+        return 0
+
+    app.logger.debug("Checking SCF listener")
+    last_check = parse_utc(scf.get('last_check'))
+    # The watermark for the NEXT poll is taken now, before the request. Using
+    # a timestamp captured after the fetch would skip anything created while
+    # the fetch was running.
+    watermark = now_utc
+    after_dt = last_check if last_check else (now_utc - timedelta(hours=1))
+    after = after_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    try:
+        issues = fetch_scf_issues(request_types, after)
+    except Exception as e:
+        failures = scf.get('consecutive_failures', 0) + 1
+        # Exponential backoff, capped. last_check is deliberately NOT advanced,
+        # so the window is retried rather than skipped.
+        delay = min(2 ** min(failures, 6), SCF_MAX_BACKOFF_MINUTES)
+        scf['consecutive_failures'] = failures
+        scf['backoff_until'] = (now_utc + timedelta(minutes=delay)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        scf['last_error'] = str(e)
+        save_listeners()
+        app.logger.error(
+            f"SCF listener error (failure {failures}, retrying in {delay}m): {e}")
+        return 0
+
+    seen = scf.get('seen') or []
+    seen_set = set(seen)
+
+    fresh = []
+    for issue in issues:
+        issue_id = issue.get('id')
+        if issue_id is None or issue_id in seen_set:
+            continue
+        seen_set.add(issue_id)
+        fresh.append(issue)
+
+    fresh.sort(key=lambda i: i.get('created_at') or '')
+
+    printed = 0
+    for issue in fresh:
+        if print_scf_issue(issue):
+            seen.append(issue.get('id'))
+            printed += 1
+        else:
+            # Printing failed (offline printer). Leave it out of `seen` so the
+            # next overlapping window picks it up again (P0-4).
+            app.logger.warning(
+                f"SCF issue {issue.get('id')} not printed; will retry next cycle")
+
+    if len(seen) > SCF_SEEN_LIMIT:
+        del seen[:-SCF_SEEN_LIMIT]  # keep the most recent ids
+    scf['seen'] = seen
+    scf['last_check'] = watermark.strftime('%Y-%m-%dT%H:%M:%SZ')
+    scf['consecutive_failures'] = 0
+    scf.pop('backoff_until', None)
+    scf.pop('last_error', None)
+    save_listeners()
+    app.logger.info(
+        f"SCF listener checked at {scf['last_check']}: "
+        f"{len(issues)} fetched, {len(fresh)} new, {printed} printed")
+    return printed
+
+
 def run_due_tasks(now):
     """Fire every due task. Each task is isolated: one unusable task cannot
     stall the others or the listener poll (P0-6). Returns tasks fired."""
@@ -768,61 +929,7 @@ def scheduler_loop():
             now_utc = datetime.now(timezone.utc)
             run_due_tasks(now)
 
-            # New: Check listeners (e.g., SCF)
-            if 'scf' in listeners:
-                scf = listeners['scf']
-                if scf['enabled'] and scf.get('request_types', '').strip():
-                    print("Checking SCF listener...")
-                    last_check = scf.get('last_check')
-                    interval = timedelta(minutes=scf['interval'])
-                    last_check_dt = None
-                    if last_check:
-                        try:
-                            # Use dateutil.parser for robust ISO8601 parsing
-                            last_check_clean = last_check.strip()
-                            last_check_dt = parser.parse(last_check_clean)
-                            # Ensure UTC
-                            if last_check_dt.tzinfo is None:
-                                last_check_dt = last_check_dt.replace(tzinfo=timezone.utc)
-                        except ValueError as e:
-                            app.logger.warning(
-                                f"Failed to parse last_check '{last_check}': {e}, using one hour ago as fallback")
-                    if last_check_dt is None or (now_utc - last_check_dt) >= interval:
-                        try:
-                            # Set 'after' (use last hour if no valid last_check, then interval)
-                            if last_check_dt is None:
-                                after = (now_utc - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-                            else:
-                                after = last_check_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-
-                            # Fetch issues
-                            params = {
-                                'status': 'open,acknowledged',
-                                'request_types': scf['request_types'],
-                                'after': after,
-                                'per_page': '100'
-                            }
-                            issues_url = "https://seeclickfix.com/api/v2/issues"
-                            app.logger.info(f"Fetching SCF issues after {after} with params: {params}")
-                            resp = requests.get(issues_url, params=params, timeout=10)
-                            resp.raise_for_status()
-                            data = resp.json()
-                            issues = data.get('issues',
-                                              [])  # Note: API paginates, but assuming <100 new issues per interval
-
-                            # Sort by created_at asc and print
-                            for issue in sorted(issues, key=lambda i: i['created_at']):
-                                print_scf_issue(issue)
-
-                            # Update last_check with strict format
-                            scf['last_check'] = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
-                            save_listeners()
-                            app.logger.info(
-                                f"SCF listener checked at {scf['last_check']}, found {len(issues)} new issues")
-                        except Exception as e:
-                            app.logger.error(f"SCF listener error: {e}")
-                elif scf['enabled'] and not scf.get('request_types', '').strip():
-                    app.logger.warning("SCF listener enabled but request_types empty; skipping check")
+            poll_scf_listener(now_utc)
         except Exception as e:
             app.logger.error(f"Scheduler loop error: {e}", exc_info=True)
 
