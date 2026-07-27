@@ -52,8 +52,9 @@
            aria-label="Search history">
     <select name="type" class="mica-input" aria-label="Filter by type">
       <option value="" {% if not kind %}selected{% endif %}>All types</option>
-      <option value="task" {% if kind == 'task' %}selected{% endif %}>Tasks</option>
-      <option value="scf" {% if kind == 'scf' %}selected{% endif %}>SeeClickFix</option>
+      {% for key, label in history_kinds() %}
+        <option value="{{ key }}" {% if kind == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
     </select>
     <input type="hidden" name="per_page" value="{{ page.per_page }}">
     <button type="submit" class="mica-btn">Search</button>
@@ -67,21 +68,7 @@
       <thead><tr><th>Type</th><th>Title</th><th>Print Time</th></tr></thead>
       <tbody>
         {% for item in history %}
-        <tr>
-          <td>
-            <span class="mica-chip {{ 'badge-scf' if item.type == 'scf' else 'badge-task' }}">
-              {{ 'SCF' if item.type == 'scf' else 'Task' }}
-            </span>
-          </td>
-          <td>
-            {%- if item.type == 'scf' -%}
-              {{ item.category }}{% if item.address %} &mdash; {{ item.address }}{% endif %}
-            {%- else -%}
-              {{ item.title }}
-            {%- endif -%}
-          </td>
-          <td>{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
-        </tr>
+        {% include 'partials/history_row.html' %}
         {% else %}
         <tr>
           <td colspan="3" class="empty-state">

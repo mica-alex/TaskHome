@@ -1,0 +1,17 @@
+{#
+  One history row (P2-1).
+
+  Shared by the home page and the tasks page, and driven by the listener
+  registry rather than an `if scf else task` chain. That chain is how NWS
+  alerts came to be badged "Task": adding a listener silently required editing
+  two templates, and nothing failed when it was not done.
+#}
+<tr>
+  <td>
+    <span class="mica-chip badge-{{ item.type | default('task') }}">
+      {{ history_label(item) }}
+    </span>
+  </td>
+  <td>{{ history_title(item) }}</td>
+  <td>{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
+</tr>

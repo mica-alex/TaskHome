@@ -207,6 +207,15 @@ def delete_task():
     return redirect(url_for('main.task_page'))
 
 
+@bp.app_context_processor
+def inject_history_helpers():
+    """History rendering is registry-driven (P2-1), so the helpers have to be
+    reachable from the shared row partial."""
+    return {'history_kinds': pagination.history_kinds,
+            'history_label': pagination.history_label,
+            'history_title': pagination.history_title}
+
+
 @bp.route('/listener')
 def listener():
     """The listeners index.

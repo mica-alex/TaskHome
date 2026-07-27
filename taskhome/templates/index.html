@@ -56,21 +56,7 @@
       <thead><tr><th>Type</th><th>Title</th><th>Printed</th></tr></thead>
       <tbody>
         {% for item in history %}
-        <tr>
-          <td>
-            <span class="mica-chip {{ 'badge-scf' if item.type == 'scf' else 'badge-task' }}">
-              {{ 'SCF' if item.type == 'scf' else 'Task' }}
-            </span>
-          </td>
-          <td>
-            {%- if item.type == 'scf' -%}
-              {{ item.category }}{% if item.address %} &mdash; {{ item.address }}{% endif %}
-            {%- else -%}
-              {{ item.title }}
-            {%- endif -%}
-          </td>
-          <td>{% with value = item.print_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}</td>
-        </tr>
+        {% include 'partials/history_row.html' %}
         {% else %}
         <tr><td colspan="3" class="empty-state">Nothing has printed yet.</td></tr>
         {% endfor %}

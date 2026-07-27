@@ -11,7 +11,41 @@ testable and will transplant unchanged onto a SQL query when P1-2 lands.
 
 PAGE_SIZES = (25, 50, 100, 250)
 DEFAULT_PAGE_SIZE = 25
-HISTORY_KINDS = ('task', 'scf')
+#: History kinds that are not listeners. Everything else is discovered from
+#: the registry, so a new listener appears in the filter and gets a correctly
+#: labelled badge without either template being touched.
+BUILTIN_KINDS = (('task', 'Tasks'),)
+
+
+def history_kinds():
+    """[(key, label)] for the type filter, built-ins first."""
+    from ..listeners import base
+    listeners = sorted((name, listener.title)
+                       for name, listener in base.registry().items())
+    # SCF predates the plugin interface and is not in the registry.
+    return list(BUILTIN_KINDS) + [('scf', 'SeeClickFix')] + listeners
+
+
+def history_label(record):
+    """The badge text for one record.
+
+    A record whose type is not recognised is labelled by its own type rather
+    than silently falling back to "Task" -- an NWS alert badged as a task is
+    how this was found.
+    """
+    kind = record.get('type', 'task')
+    for key, label in history_kinds():
+        if key == kind:
+            return label.rstrip('s') if key == 'task' else label
+    return kind.upper()
+
+
+def history_title(record):
+    """The one-line description for one record, whatever kind it is."""
+    if record.get('title'):
+        return record['title']
+    parts = [record.get('category'), record.get('address')]
+    return ' \u2014 '.join(p for p in parts if p) or record.get('summary', '')
 
 
 def history_search_text(record):
@@ -26,7 +60,7 @@ def history_search_text(record):
 def filter_history(records, query='', kind=''):
     """Filter by free text and record type. Order is preserved (newest first)."""
     result = records
-    if kind in HISTORY_KINDS:
+    if kind in {key for key, _ in history_kinds()}:
         result = [r for r in result if r.get('type', 'task') == kind]
     query = (query or '').strip().lower()
     if query:

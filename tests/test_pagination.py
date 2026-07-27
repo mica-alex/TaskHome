@@ -215,3 +215,49 @@ def test_index_still_shows_only_recent_history(client, clean_state):
     body = client.get('/').get_data(as_text=True)
     assert 'Task 0' in body
     assert 'Task 40' not in body
+
+
+# --- history rendering must follow the registry (P2-1) ------------------------
+
+def test_a_new_listener_appears_in_the_type_filter():
+    """NWS alerts were unfilterable and badged "Task" because the filter was a
+    hardcoded two-option list and the row was an `if scf else task` chain."""
+    from taskhome.web import pagination
+    from taskhome.listeners import base
+    keys = {key for key, _ in pagination.history_kinds()}
+    assert {'task', 'scf'} <= keys
+    for name in base.registry():
+        assert name in keys, f'{name} is missing from the history filter'
+
+
+def test_every_registered_listener_gets_its_own_badge_label():
+    from taskhome.web import pagination
+    from taskhome.listeners import base
+    for name, listener in base.registry().items():
+        assert pagination.history_label({'type': name}) == listener.title
+
+
+def test_an_unknown_record_type_is_not_labelled_as_a_task():
+    """Silently falling back to "Task" is what hid the bug."""
+    from taskhome.web import pagination
+    assert pagination.history_label({'type': 'mystery'}) != 'Task'
+
+
+def test_records_with_no_type_are_still_tasks():
+    """History written before the type field existed has no 'type' key."""
+    from taskhome.web import pagination
+    assert pagination.history_label({}) == 'Task'
+
+
+def test_filtering_by_a_listener_kind_works():
+    from taskhome.web import pagination
+    records = [{'type': 'task', 'title': 'a'}, {'type': 'nws', 'category': 'Tornado Warning'},
+               {'type': 'scf', 'category': 'Pothole'}]
+    assert len(pagination.filter_history(records, kind='nws')) == 1
+
+
+def test_a_listener_record_gets_a_readable_title():
+    from taskhome.web import pagination
+    title = pagination.history_title(
+        {'type': 'nws', 'category': 'Tornado Warning', 'address': 'Hillsborough, NH'})
+    assert 'Tornado Warning' in title and 'Hillsborough' in title

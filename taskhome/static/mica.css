@@ -869,3 +869,9 @@ body {
         scroll-behavior: auto !important;
     }
 }
+
+/* History badges are keyed by record type, so a new listener gets a distinct
+ * colour by adding one rule rather than editing a template. */
+.badge-task { background: color-mix(in srgb, var(--mica-accent) 18%, transparent); }
+.badge-scf  { background: color-mix(in srgb, hsl(28, 90%, 55%) 22%, transparent); }
+.badge-nws  { background: color-mix(in srgb, hsl(0, 80%, 55%) 22%, transparent); }
