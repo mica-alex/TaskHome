@@ -139,27 +139,20 @@ tr.task-inactive td {
     margin-bottom: 12px;
 }
 
+/* Layout only. Appearance comes from .mica-input in mica.css -- duplicating
+   it here would win on specificity and silently render the new controls in the
+   old palette. */
 .history-filter input[type="search"] {
     flex: 1 1 240px;
     min-width: 0;
-    padding: 6px 10px;
-    border: 1px solid var(--input-border, #555);
-    border-radius: 4px;
-    background-color: var(--input-bg);
-    color: var(--input-text);
-    height: auto;
-    box-sizing: border-box;
 }
 
-/* Materialize hides native selects; this one must survive without it. */
-.history-filter select {
-    display: inline-block !important;
-    padding: 6px 10px;
-    border: 1px solid var(--input-border, #555);
-    border-radius: 4px;
-    background-color: var(--input-bg);
-    color: var(--input-text);
-}
+/*
+ * The history filter used to force `display: inline-block !important` to
+ * survive Materialize hiding native selects. Materialize now skips
+ * .mica-input entirely, so the override is gone -- it was what produced the
+ * doubled dropdown, showing both the real select and Materialize's fake one.
+ */
 
 .pager {
     display: flex;

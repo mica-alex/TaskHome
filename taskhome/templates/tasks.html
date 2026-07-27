@@ -47,10 +47,10 @@
 
             {# Search and filter submit as GET so every view is bookmarkable. #}
             <form class="history-filter" method="GET" action="{{ url_for('main.task_page') }}">
-                <input type="search" name="q" value="{{ query }}"
+                <input type="search" name="q" class="mica-input" value="{{ query }}"
                        placeholder="Search title, address, description&hellip;"
                        aria-label="Search history">
-                <select name="type" aria-label="Filter by type">
+                <select name="type" class="mica-input" aria-label="Filter by type">
                     <option value="" {% if not kind %}selected{% endif %}>All types</option>
                     <option value="task" {% if kind == 'task' %}selected{% endif %}>Tasks</option>
                     <option value="scf" {% if kind == 'scf' %}selected{% endif %}>SeeClickFix</option>
@@ -217,7 +217,13 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            var selects = document.querySelectorAll('select');
+                        /*
+             * Skip Mica-styled controls. FormSelect replaces a <select> with
+             * its own markup and hides the original; a control we also style
+             * ourselves then renders twice -- once real, once fake. Excluding
+             * them here is the fix, not fighting it with CSS.
+             */
+            var selects = document.querySelectorAll('select:not(.mica-input):not([data-no-materialize])');
             M.FormSelect.init(selects);
 
             var recurringSelects = document.querySelectorAll('select[name="recurring"]');

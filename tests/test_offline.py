@@ -171,3 +171,32 @@ def test_legacy_input_overrides_exempt_mica_controls():
     css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
     assert ':not(.mica-input)' in css, (
         'the legacy input overrides are not exempting Mica controls')
+
+
+def test_materialize_skips_mica_controls():
+    """Materialize's FormSelect replaces a <select> with its own markup and
+    hides the original. A control we also style ourselves then renders twice --
+    once real, once fake -- which is what produced the doubled dropdown on the
+    history filter. Every template that initialises selects must exclude them.
+    """
+    initialising = [p for p in template_files() if 'FormSelect.init' in p.read_text()]
+    assert initialising, 'expected at least one template to initialise selects'
+    for path in initialising:
+        text = path.read_text()
+        assert ':not(.mica-input)' in text, (
+            f'{path.name} initialises Materialize selects without excluding '
+            f'Mica-styled ones')
+
+
+def test_mica_control_appearance_is_not_overridden_by_legacy_css():
+    """styles.css must not restate colours for controls mica.css owns: a more
+    specific legacy selector wins and renders the new UI in the old palette,
+    which reads as a design mistake rather than a bug."""
+    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
+    block_start = css.find('.history-filter input[type="search"]')
+    assert block_start != -1
+    block = css[block_start:css.index('}', block_start)]
+    for property_name in ('background-color', 'color', 'border'):
+        assert property_name not in block, (
+            f'.history-filter input restates {property_name}; leave appearance '
+            f'to .mica-input')

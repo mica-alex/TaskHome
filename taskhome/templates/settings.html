@@ -65,7 +65,13 @@
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Initializing Materialize selects');
-            var selects = document.querySelectorAll('select');
+                        /*
+             * Skip Mica-styled controls. FormSelect replaces a <select> with
+             * its own markup and hides the original; a control we also style
+             * ourselves then renders twice -- once real, once fake. Excluding
+             * them here is the fix, not fighting it with CSS.
+             */
+            var selects = document.querySelectorAll('select:not(.mica-input):not([data-no-materialize])');
             M.FormSelect.init(selects, {
                 onOpenStart: function() { console.log('Select opened'); },
                 onCloseEnd: function() { console.log('Select closed'); }
