@@ -32,12 +32,17 @@ DPI = 203
 SPACING_DIVISOR = 180          # ESC 3 n sets n/180 inch; the widely supported one
 
 # Extra vertical space below a line, on top of the character cell height.
-# The printer's factory default line feed is about 34 dots, which is FINE for
-# single-height text but shorter than a double-height character cell (48 dots)
-# -- so a 2x title had the following line printed into its descenders. Spacing
-# is therefore computed per block from the actual cell height rather than left
-# at the default.
-LEADING_DOTS = 6
+#
+# The printer's factory default feed is about 34 dots. That is generous for
+# font b (17-dot cell) but SHORTER than a double-height font a cell (48 dots),
+# so a 2x title had the next line printed into its descenders. Spacing is
+# therefore computed per block from the actual cell height.
+#
+# The value is empirical, from looking at printed paper: 6 dots was measurably
+# too tight -- adjacent font b lines touched -- while the 17 dots implied by
+# the factory default is more air than a compact receipt wants. 10 keeps body
+# text clearly separated and still saves height on every line.
+LEADING_DOTS = 10
 
 # Feed used around a QR image. The symbol itself already carries a 1-module
 # quiet zone (python-escpos builds it with border=1), so the visible gap was
@@ -231,7 +236,14 @@ def render_escpos(blocks, printer):
                             custom_size=True,
                             width=max(int(block.get('width', 1)), 1),
                             height=max(int(block.get('height', 1)), 1))
-                printer.text(str(block['value']) + '\n')
+                # Wrap here rather than letting the printer do it. The printer
+                # hard-wraps at the column limit, splitting words mid-way
+                # ("...5 cars g" / "o by at a time"), while the preview wraps
+                # on word boundaries -- so the two disagreed on real paper.
+                # Emitting pre-wrapped lines makes the preview authoritative.
+                cols = columns_for(block.get('font', 'b'), block.get('width', 1))
+                for line in wrap(block['value'], cols):
+                    printer.text(line + '\n')
     finally:
         printer.line_spacing()          # restore the printer default
 

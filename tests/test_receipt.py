@@ -265,3 +265,45 @@ def test_long_title_wraps_rather_than_overflowing():
     task = dict(TASK, title='An extremely long task title that will not fit on one line')
     for line in r.render_text(layouts.task_receipt(task, URL)):
         assert len(line) <= r.PAGE_COLUMNS
+
+
+# --- preview/print agreement (found on real paper) ----------------------------
+
+def test_printer_receives_pre_wrapped_lines():
+    """The printer hard-wraps at the column limit, splitting words mid-way,
+    while the preview wraps on word boundaries. Emitting pre-wrapped lines is
+    what makes them agree -- without it the shared renderer's central promise
+    is false, as an actual receipt demonstrated ("...5 cars g" / "o by at...").
+    """
+    body = ('The signal on Lincoln st is broken. Light will only let 5 cars go '
+            'by at a time on to South Willow.')
+    p = RecordingPrinter()
+    r.render_escpos([r.text(body, font='b')], p)
+
+    printed = [c[1].rstrip('\n') for c in p.calls if c[0] == 'text']
+    assert printed == r.wrap(body, 64)
+    assert all(len(line) <= 64 for line in printed)
+    assert not any(line.endswith(' g') for line in printed)
+
+
+def test_no_printed_line_exceeds_its_column_budget():
+    p = RecordingPrinter()
+    blocks = layouts.scf_receipt(ISSUE, **SCF)
+    r.render_escpos(blocks, p)
+    # Reconstruct which font each text call used from the preceding set().
+    font, width = 'b', 1
+    for kind, payload in p.calls:
+        if kind == 'set':
+            font = payload.get('font', font)
+            width = payload.get('width', width)
+        elif kind == 'text':
+            line = payload.rstrip('\n')
+            if line:
+                assert len(line) <= r.columns_for(font, width), \
+                    f'{line!r} exceeds {r.columns_for(font, width)} columns'
+
+
+def test_leading_keeps_adjacent_body_lines_apart():
+    """6 dots let adjacent font b lines touch on paper; the cell is 17."""
+    gap = r.line_dots(r.text('x', font='b')) - r.FONTS['b']['cell_h']
+    assert gap >= 8, 'body lines will look cramped or touch'
