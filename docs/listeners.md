@@ -8,6 +8,8 @@ are two:
 | `scf` | SeeClickFix civic issues | poll | Bespoke — predates the plugin interface |
 | `nws` | NOAA / National Weather Service alerts | poll | `base.Listener` |
 | `feeds` | RSS / Atom digest | poll | `base.Listener` |
+| `calendar` | ICS calendar agenda | poll | `base.Listener` |
+| `brief` | Composes the others | poll | `base.Listener` |
 | `webhook` | Anything that can POST | **push** | `base.Listener` |
 
 `listeners/base.py` is the plugin interface (`P5-1`). SeeClickFix still runs
@@ -387,6 +389,55 @@ Three behaviours worth knowing:
 The source line under each headline uses a `-` prefix rather than indentation,
 because `wrap()` strips leading whitespace — spaces would vanish and the source
 would read as a second headline.
+
+## The calendar listener (`listeners/calendar.py`)
+
+Today's events from any ICS URL — Google, iCloud, Outlook, and most municipal
+bin-day calendars. One agenda receipt per day, not one per event.
+
+ICS is parsed here, but **recurrence is expanded with `dateutil.rrule`**, which
+was already a dependency. That split is deliberate: unfolding lines and
+splitting properties is thirty lines of obvious code, while RRULE is a genuinely
+hard specification — `BYSETPOS`, `BYDAY` with ordinals, interval arithmetic
+across DST — and hand-rolling it would be a slow-burning source of "why did my
+Tuesday meeting print on Wednesday".
+
+Details that matter, each verified against a real Google calendar feed:
+
+- **Line unfolding is not optional.** A `SUMMARY` over 75 octets is split
+  mid-word with the continuation indented; parsing line-by-line silently
+  truncates it.
+- **All-day events are calendar squares, not instants.** They carry
+  `VALUE=DATE` and are kept at local midnight — converting from UTC shifts them
+  a day for anyone west of Greenwich.
+- `webcal://` is rewritten to `https://`, because that is what Apple hands you
+  when you copy a calendar link.
+- `STATUS:CANCELLED` events and `EXDATE` exclusions are dropped.
+- An empty day still marks itself done, or the listener retries every interval
+  until midnight looking for events that are not there.
+
+## The morning brief (`listeners/brief.py`)
+
+The only listener that **composes other listeners** rather than fetching
+anything itself: date, weather, today's tasks, today's calendar, headlines —
+one receipt, once a day.
+
+Composition is the whole design:
+
+- **Configuration is not duplicated.** The brief uses the ZIP codes, calendar
+  URLs and feeds already configured on those listeners. Its own schema
+  deliberately contains none of them, and a test asserts that.
+- **A section with nothing configured is absent**, rather than printing an
+  empty heading.
+- **A failing section leaves the rest intact.** A brief missing its headlines
+  is useful; one that refused to print because a feed 502'd is not.
+- The source listeners do **not** have to be enabled for printing. Someone may
+  want weather in their brief without a receipt for every advisory.
+
+`receipt_blocks` is built from the sections that actually have content rather
+than from the template, because a brief's shape changes daily and an empty
+heading with nothing under it is worse than no heading. The editable template
+still exists for people who want a fixed layout.
 
 ## The NOAA weather listener (`listeners/nws.py`)
 

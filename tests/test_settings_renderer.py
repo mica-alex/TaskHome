@@ -129,6 +129,7 @@ def test_every_field_type_is_coercible():
     time_range dict into the literal text "{'start': '23:00', ...}"."""
     samples = {'bool': True, 'int': 3, 'text': 'x', 'secret': 'x',
                'select': 'a', 'multiselect': ['a'], 'duration': 15,
+               'time': '07:00',
                'time_range': {'start': '22:00', 'end': '07:00'},
                'matrix': {'row': {'enabled': True}}}
     for kind in base.FIELD_TYPES:
@@ -155,3 +156,19 @@ def test_visual_content_stays_inside_the_page_container(client):
     import re
     stray = re.findall(r'<div class="mica-card"', after_main)
     assert not stray, 'a card is rendered outside <main> and will span the viewport'
+
+
+def test_an_unknown_field_type_is_flagged_in_the_ui():
+    """It used to fall through to a plain text input, which looks completely
+    fine and quietly corrupts the value on save."""
+    import pathlib
+    macro = pathlib.Path('taskhome/templates/partials/setting_field.html').read_text()
+    tail = macro[macro.rindex('{% else %}'):]
+    assert 'unsupported type' in tail
+
+
+@pytest.mark.parametrize('bad', ['25:00', '7:00', 'morning', ''])
+def test_a_bad_time_is_refused(bad):
+    spec = base.field('print_at', 'Print at', 'time')
+    with pytest.raises(ValueError, match='Print at'):
+        base.coerce_field(spec, bad)

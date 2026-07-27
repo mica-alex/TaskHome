@@ -1202,3 +1202,7 @@ main:focus-visible { outline: none; }
     .mica-nav::-webkit-scrollbar { display: none; }
     .mica-nav a { white-space: nowrap; }
 }
+
+/* A time input sizes itself to its content; left alone it stretches to the
+ * full field width and looks like a text box that lost its label. */
+.mica-input-time { width: auto; max-width: 160px; }

@@ -26,7 +26,7 @@ from ..logsetup import log
 TIME_RE = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
 
 FIELD_TYPES = ('bool', 'int', 'text', 'secret', 'select', 'multiselect',
-               'duration', 'time_range', 'matrix')
+               'duration', 'time', 'time_range', 'matrix')
 
 
 def field(key, label, type='text', default=None, help='', group=None,
@@ -328,6 +328,10 @@ def coerce_field(spec, value):
         items = value if isinstance(value, list) else [
             v.strip() for v in str(value).split(',') if v.strip()]
         return items
+    if kind == 'time':
+        if not TIME_RE.match(str(value or '')):
+            raise ValueError(f'{label} must be a time like 07:00.')
+        return str(value)
     if kind == 'time_range':
         if not isinstance(value, dict):
             raise ValueError(f'{label} must have a start and an end.')

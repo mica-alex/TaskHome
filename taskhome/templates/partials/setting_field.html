@@ -165,15 +165,33 @@
                 data-matrix-none="{{ spec.key }}">Select none</button>
       </div>
 
+    {% elif kind == 'time' %}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <input class="mica-input mica-input-time" type="time" name="{{ spec.key }}"
+             id="f-{{ spec.key }}" value="{{ value or '' }}">
+
     {% elif kind == 'secret' %}
       <label for="f-{{ spec.key }}">{{ spec.label }}</label>
       <input class="mica-input" type="password" name="{{ spec.key }}" id="f-{{ spec.key }}"
              value="{{ value or '' }}" autocomplete="off">
 
-    {% else %}
+    {% elif kind == 'text' %}
       <label for="f-{{ spec.key }}">{{ spec.label }}</label>
       <input class="mica-input" type="text" name="{{ spec.key }}" id="f-{{ spec.key }}"
              value="{{ value or '' }}">
+
+    {% else %}
+      {#
+        An unrecognised field type. Rendered loudly rather than falling back to
+        a text input: a text box for a type the coercer does not know looks
+        completely fine and quietly corrupts the value on save.
+      #}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <input class="mica-input" type="text" name="{{ spec.key }}" id="f-{{ spec.key }}"
+             value="{{ value or '' }}">
+      <span class="mica-help is-error">
+        This setting has an unsupported type ({{ kind }}) and may not save correctly.
+      </span>
     {% endif %}
 
     {% if spec.help %}<span class="mica-help">{{ spec.help }}</span>{% endif %}
