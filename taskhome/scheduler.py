@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 
 from . import printing, queue, recurrence, state, storage
-from .listeners import scf
+from .listeners import base as listener_base, scf
 from .logsetup import log
 
 
@@ -113,6 +113,8 @@ def scheduler_loop():
             run_due_tasks(now)
 
             scf.poll_scf_listener(now_utc)
+            # Listeners built on the plugin interface (P5-1).
+            listener_base.run_all(now_utc)
         except Exception as e:
             log.error(f"Scheduler loop error: {e}", exc_info=True)
 

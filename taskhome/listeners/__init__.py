@@ -1,9 +1,9 @@
 """Listeners poll an external source and print new items as receipts.
 
-Only SeeClickFix exists so far and the scheduler calls it directly. The plugin
-interface that makes adding one a matter of dropping in a class -- with an
-auto-generated settings page -- is MASTER_PLAN P5-1.
+`scf` predates the plugin interface and still runs through its own function;
+`nws` is built on `base.Listener`, which provides interval gating, watermarks,
+dedup, backoff, per-poll caps and the settings schema (P5-1).
 """
-from . import scf
+from . import base, nws, scf
 
-__all__ = ['scf']
+__all__ = ['base', 'nws', 'scf']
