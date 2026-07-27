@@ -167,6 +167,9 @@ def test_issues_print_oldest_first(scf, clean_state):
 
 def test_all_pages_are_fetched(scf, clean_state, monkeypatch):
     monkeypatch.setattr(taskhome, 'SCF_PER_PAGE', 10)
+    # Raise the per-poll cap out of the way; this test is about paging, and
+    # the cap is covered separately below.
+    taskhome.listeners['scf']['max_prints_per_poll'] = 100
     scf.set_issues([issue(i) for i in range(25)], per_page=10)
     assert taskhome.poll_scf_listener(utc('2026-03-05T12:00:00')) == 25
     assert len(scf.requests) == 3
@@ -267,3 +270,87 @@ def test_unprinted_issue_is_retried_next_cycle(scf, clean_state):
 
     clean_state.online = True
     assert taskhome.poll_scf_listener(utc('2026-03-05T12:10:00')) == 1
+
+
+# --- per-poll print cap -------------------------------------------------------
+
+def test_poll_caps_receipts_and_says_so(scf, clean_state, monkeypatch):
+    """Fixing pagination removed the accidental protection the old 100-issue
+    truncation gave. A wide window must not print hundreds of receipts."""
+    notices = []
+    monkeypatch.setattr(taskhome, 'print_scf_notice',
+                        lambda h, d: notices.append(h) or True)
+    taskhome.listeners['scf']['max_prints_per_poll'] = 5
+    scf.set_issues([issue(i, f'2026-03-05T{i:02d}:00:00Z') for i in range(20)])
+
+    printed = taskhome.poll_scf_listener(utc('2026-03-05T23:00:00'))
+
+    assert printed == 5
+    assert len(notices) == 1
+    assert '15 older issue' in notices[0]
+
+
+def test_capped_issues_are_not_reprinted_next_poll(scf, clean_state, monkeypatch):
+    """Suppressed issues must be marked seen, or the same flood recurs every
+    cycle forever."""
+    monkeypatch.setattr(taskhome, 'print_scf_notice', lambda h, d: True)
+    taskhome.listeners['scf']['max_prints_per_poll'] = 5
+    scf.set_issues([issue(i, f'2026-03-05T{i:02d}:00:00Z') for i in range(20)])
+
+    taskhome.poll_scf_listener(utc('2026-03-05T23:00:00'))
+    before = len(clean_state)
+    taskhome.poll_scf_listener(utc('2026-03-05T23:30:00'))
+
+    assert len(clean_state) == before
+    assert len(taskhome.listeners['scf']['seen']) == 20
+
+
+def test_cap_keeps_the_newest(scf, clean_state, monkeypatch):
+    monkeypatch.setattr(taskhome, 'print_scf_notice', lambda h, d: True)
+    taskhome.listeners['scf']['max_prints_per_poll'] = 3
+    scf.set_issues([issue(i, f'2026-03-05{"T%02d:00:00Z" % i}') for i in range(10)])
+
+    taskhome.poll_scf_listener(utc('2026-03-05T23:00:00'))
+
+    assert [i['id'] for i in clean_state] == [7, 8, 9]
+
+
+def test_default_cap_applies_without_config(scf, clean_state, monkeypatch):
+    monkeypatch.setattr(taskhome, 'print_scf_notice', lambda h, d: True)
+    monkeypatch.setattr(taskhome, 'SCF_MAX_PRINTS_PER_POLL', 4)
+    scf.set_issues([issue(i) for i in range(10)])
+    assert taskhome.poll_scf_listener(utc('2026-03-05T23:00:00')) == 4
+
+
+def test_under_the_cap_prints_no_notice(scf, clean_state, monkeypatch):
+    notices = []
+    monkeypatch.setattr(taskhome, 'print_scf_notice',
+                        lambda h, d: notices.append(h) or True)
+    taskhome.listeners['scf']['max_prints_per_poll'] = 50
+    scf.set_issues([issue(i) for i in range(3)])
+
+    taskhome.poll_scf_listener(utc('2026-03-05T23:00:00'))
+    assert notices == []
+
+
+@pytest.mark.parametrize('bad', ['abc', None, -1])
+def test_invalid_cap_falls_back_to_default(scf, clean_state, monkeypatch, bad):
+    """A malformed cap must not silently disable printing."""
+    monkeypatch.setattr(taskhome, 'print_scf_notice', lambda h, d: True)
+    taskhome.listeners['scf']['max_prints_per_poll'] = bad
+    scf.set_issues([issue(i) for i in range(3)])
+    assert taskhome.poll_scf_listener(utc('2026-03-05T23:00:00')) == 3
+
+
+def test_zero_cap_is_valid_monitor_only_mode(scf, clean_state, monkeypatch):
+    """0 is deliberately meaningful: track issues without printing any."""
+    notices = []
+    monkeypatch.setattr(taskhome, 'print_scf_notice',
+                        lambda h, d: notices.append(h) or True)
+    taskhome.listeners['scf']['max_prints_per_poll'] = 0
+    scf.set_issues([issue(i) for i in range(3)])
+
+    assert taskhome.poll_scf_listener(utc('2026-03-05T23:00:00')) == 0
+    assert clean_state == []
+    assert len(taskhome.listeners['scf']['seen']) == 3  # tracked, not printed
+    assert len(notices) == 1

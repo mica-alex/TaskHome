@@ -857,6 +857,15 @@ SCF_MAX_PAGES = 20          # 2000 issues per poll; a guard, not a real limit
 SCF_SEEN_LIMIT = 2000       # bounded dedup memory
 SCF_MAX_BACKOFF_MINUTES = 60
 
+# Ceiling on receipts emitted by a single poll. Fixing the pagination bug
+# removed the accidental protection the old 100-issue truncation provided: a
+# wide window (a long outage, a cleared last_check, or a freshly enabled
+# listener looking an hour back) could now genuinely print hundreds of
+# receipts. Excess issues are marked seen so they do not simply reappear next
+# cycle, and a single notice receipt reports how many were suppressed --
+# never a silent drop. Override per listener with 'max_prints_per_poll'.
+SCF_MAX_PRINTS_PER_POLL = 20
+
 
 def parse_utc(value, default=None):
     """Parse an ISO 8601 timestamp to an aware UTC datetime, or return default."""
@@ -912,6 +921,32 @@ def fetch_scf_issues(request_types, after):
             f"SCF pagination hit the {SCF_MAX_PAGES}-page guard; "
             f"some issues were not fetched this cycle")
     return collected
+
+
+def print_scf_notice(headline, detail):
+    """Small receipt announcing that the listener suppressed something.
+
+    Kept deliberately minimal: it exists so a capped poll is visible on paper
+    rather than only in a log nobody reads.
+    """
+    if not is_printer_connected():
+        app.logger.warning(f"Printer not connected; notice not printed: {headline}")
+        return False
+    try:
+        with open_printer() as p:
+            p.set(align='center', font='a', bold=True, custom_size=True,
+                  width=1, height=1)
+            p.text('SeeClickFix notice\n')
+            p.set(align='center', font='b', bold=False, custom_size=True,
+                  width=1, height=1)
+            p.text(headline + '\n\n')
+            p.text(detail + '\n\n')
+            p.text(datetime.now().strftime('%I:%M %p, %m/%d/%Y') + '\n')
+            p.cut()
+        return True
+    except Exception as e:
+        app.logger.error(f"Failed to print SCF notice: {e}")
+        return False
 
 
 def scf_due(scf, now_utc):
@@ -987,6 +1022,29 @@ def poll_scf_listener(now_utc):
 
     fresh.sort(key=lambda i: i.get('created_at') or '')
 
+    # Cap receipts per poll. Keep the newest, since those are the ones still
+    # worth acting on, and mark the rest seen so they don't reappear forever.
+    try:
+        per_poll_cap = int(scf.get('max_prints_per_poll', SCF_MAX_PRINTS_PER_POLL))
+    except (TypeError, ValueError):
+        per_poll_cap = SCF_MAX_PRINTS_PER_POLL
+    if per_poll_cap < 0:
+        # Negative is meaningless; fall back rather than clamping to 0, which
+        # would silently turn the listener into monitor-only. 0 IS valid and
+        # means exactly that, deliberately.
+        app.logger.warning(
+            f"Invalid max_prints_per_poll {per_poll_cap}, using {SCF_MAX_PRINTS_PER_POLL}")
+        per_poll_cap = SCF_MAX_PRINTS_PER_POLL
+
+    suppressed = []
+    if len(fresh) > per_poll_cap:
+        suppressed = fresh[:-per_poll_cap] if per_poll_cap else fresh
+        fresh = fresh[-per_poll_cap:] if per_poll_cap else []
+        app.logger.warning(
+            f"SCF poll found {len(suppressed) + len(fresh)} new issues, over the "
+            f"{per_poll_cap}-per-poll cap. Printing the {len(fresh)} newest and "
+            f"suppressing {len(suppressed)}.")
+
     printed = 0
     for issue in fresh:
         if print_scf_issue(issue):
@@ -997,6 +1055,16 @@ def poll_scf_listener(now_utc):
             # next overlapping window picks it up again (P0-4).
             app.logger.warning(
                 f"SCF issue {issue.get('id')} not printed; will retry next cycle")
+
+    if suppressed:
+        # Mark suppressed issues seen so the next poll doesn't reprint them,
+        # then say so on paper -- a silent drop would misrepresent the feed.
+        for issue in suppressed:
+            seen.append(issue.get('id'))
+        print_scf_notice(
+            f"{len(suppressed)} older issue(s) were not printed",
+            f"Poll exceeded the {per_poll_cap}-per-poll limit. "
+            f"See the TaskHome history and log for what was skipped.")
 
     if len(seen) > SCF_SEEN_LIMIT:
         del seen[:-SCF_SEEN_LIMIT]  # keep the most recent ids

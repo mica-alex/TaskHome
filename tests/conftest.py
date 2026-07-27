@@ -21,6 +21,50 @@ REAL_STATE_FILES = [REPO_ROOT / name for name in
                     ('config.json', 'tasks.json', 'history.json', 'listeners.json')]
 
 
+class RealPrinterReached(AssertionError):
+    """A test tried to open the physical printer."""
+
+
+@pytest.fixture(autouse=True)
+def no_physical_printing(monkeypatch):
+    """Make the real printer unreachable from every test, always.
+
+    This is not paranoia. A test that patched print_scf_issue but not
+    print_scf_notice, combined with is_printer_connected() being patched to
+    True, opened the real USB device and emitted an actual receipt on the
+    user's newly connected printer.
+
+    Patching individual print functions per test is the wrong layer: any code
+    path that reaches escpos.printer.Usb prints, and it is easy to add one
+    without noticing. So the device constructor itself is replaced. Tests that
+    want to observe print behaviour patch the higher-level functions on top of
+    this; tests that do not simply cannot reach hardware.
+    """
+    attempts = []
+
+    def forbidden(*args, **kwargs):
+        attempts.append(True)
+        raise RealPrinterReached(
+            "a test tried to open the physical printer via escpos Usb(). "
+            "Patch the print_* function you are exercising, or use the "
+            "fake_printer fixture in tests/test_printing.py.")
+
+    monkeypatch.setattr(taskhome, 'Usb', forbidden)
+    # usb.core.find backs is_printer_connected(); default to "absent" so any
+    # unpatched probe reports no printer rather than trying to use one.
+    monkeypatch.setattr(taskhome.usb.core, 'find', lambda *a, **k: None)
+
+    yield
+
+    # Raising is not enough on its own: the print functions catch broad
+    # exceptions and return False, so a blocked attempt would be swallowed and
+    # the test would still pass -- hiding the fact that it would have printed
+    # on real hardware. Fail the test explicitly.
+    assert not attempts, (
+        "this test reached escpos Usb(); on a machine with the printer "
+        "connected it would have emitted real paper.")
+
+
 @pytest.fixture(autouse=True)
 def never_touch_real_data():
     """Fail loudly if any test modifies the user's live JSON files.

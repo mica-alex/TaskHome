@@ -43,6 +43,26 @@ History is written only after a receipt is out and the handle is closed.
 History is the record of paper that exists — reprint-from-history depends on
 that being true.
 
+## Measured column widths
+
+Determined by printing a ruler on the actual hardware
+(`./scripts/calibrate_printer.py --confirm`) rather than trusting published
+figures, because the published figures disagree:
+
+| Font | Columns | Source |
+| --- | --- | --- |
+| `a` (default) | **48** | Measured. Confirms escpos's TM-T20II profile; the widely quoted 42 is wrong for this model |
+| `b` (small) | **≥ 64** | Measured — did not wrap at 64. Re-run with `--width 96` to pin down the exact value |
+
+This matters beyond trivia: MASTER_PLAN `P3-3`'s live receipt preview is only
+honest if the browser models the same column count the printer uses. A preview
+built on 42 columns would wrap text the printer would not, and vice versa.
+
+Note the connected unit reports itself as **TM-T20III*L*** (the "L" variant),
+while `PRINTER_MODEL` says `TM-T20III`. The escpos profile in use is
+`TM-T20II`. All three disagree and it works anyway — ESC/POS is
+forgiving here — but the measured numbers above are the ones to trust.
+
 ## `p.set(...)` cheat sheet
 
 `p.set()` is python-escpos's character-formatting call; parameters used here:
@@ -50,7 +70,7 @@ that being true.
 | Param | Meaning |
 | --- | --- |
 | `align` | Horizontal alignment (`center` everywhere in this app) |
-| `font` | `'a'` = 12×24 dots (48 cols on 80 mm) or `'b'` = 9×17 dots (64 cols); all text in this app is centered so column math rarely bites |
+| `font` | `'a'` = 48 columns, `'b'` = 64+ columns on 80 mm — **measured on the actual unit**, see below |
 | `bold` | Emphasis on/off |
 | `custom_size=True, width=N, height=N` | Character-cell multipliers 1–8; `width=3, height=3` prints triple-size characters |
 | `density` | Print density (darkness), 0–8; `4` used for QR/title blocks |
