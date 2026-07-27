@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}{{ person.name if person else 'Not found' }}{% endblock %}
+{% block content %}
+{#
+  The page a printed QR leads to. Big, obvious, and readable at arm's length --
+  it is looked at once, by a child, holding a receipt.
+#}
+{% if not person %}
+  <div class="mica-card chore-done">
+    <h1>That link is not valid</h1>
+    <p class="mica-help">
+      The chart may have been reprinted since, or the code rotated. Ask for a
+      fresh one.
+    </p>
+  </div>
+{% else %}
+  <div class="mica-card chore-done {{ 'is-already' if already }}">
+    <div class="chore-tick" aria-hidden="true">{{ '✓' }}</div>
+    <h1>{{ 'Already done today' if already else 'Nice one, ' ~ person.name ~ '!' }}</h1>
+    {% if streak %}
+      <p class="chore-streak">{{ streak }} day{{ '' if streak == 1 else 's' }} in a row</p>
+      {% if best > streak %}
+        <p class="mica-help">Your best is {{ best }}.</p>
+      {% endif %}
+      {% if best == streak and streak > 1 %}
+        <p class="mica-help">That is your best yet.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

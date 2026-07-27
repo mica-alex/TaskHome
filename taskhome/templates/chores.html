@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Chores{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <h1>Chore charts</h1>
+  <p class="mica-help">
+    A checklist each morning, with a QR code to mark the day done. Scanning it
+    keeps a streak going, which shows on the next morning's chart.
+  </p>
+</div>
+
+<div class="mica-card">
+  <form class="token-add" id="new-person">
+    <label class="sr-only" for="new-person-name">Name</label>
+    <input class="mica-input" id="new-person-name" placeholder="Add someone&hellip;"
+           maxlength="40">
+    <button type="submit" class="mica-btn">Add</button>
+  </form>
+</div>
+
+<div class="listener-grid">
+  {% for person in people %}
+  <div class="mica-card" data-person="{{ person.id }}">
+    <div class="card-heading">
+      <h2 class="mica-card-title">{{ person.name }}</h2>
+      <span class="mica-chip {{ 'mica-chip-accent' if person.done_today else 'mica-chip-muted' }}">
+        {% if person.streak %}{{ person.streak }} day streak{% else %}No streak{% endif %}
+      </span>
+    </div>
+
+    <div class="mica-field">
+      <label for="chores-{{ person.id }}">Chores, one per line</label>
+      <textarea class="mica-input" id="chores-{{ person.id }}" rows="4"
+                data-chores>{{ person.chores | join('\n') }}</textarea>
+    </div>
+
+    <div class="mica-field">
+      <label>Days</label>
+      <div class="option-list">
+        {% for label in weekdays %}
+          <label class="mica-checkbox">
+            <input type="checkbox" data-day value="{{ loop.index0 }}"
+                   {% if loop.index0 in person.days %}checked{% endif %}>
+            <span>{{ label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="studio-actions">
+      <button type="button" class="mica-btn" data-save-person>Save</button>
+      <button type="button" class="mica-btn mica-btn-secondary" data-print-person>
+        Print now
+      </button>
+      <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+              data-toggle-done>
+        {{ 'Undo today' if person.done_today else 'Mark done' }}
+      </button>
+      <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+              data-delete-person>Remove</button>
+    </div>
+
+    <p class="mica-help">
+      Best streak {{ person.best }}.
+      <button type="button" class="link-button" data-rotate-token
+              title="Invalidates any chart already printed">Rotate code</button>
+    </p>
+  </div>
+  {% else %}
+  <div class="mica-card empty-state">
+    <p>Nobody on the chart yet.</p>
+    <p class="mica-help">Add someone above, then switch on the Chore charts listener.</p>
+  </div>
+  {% endfor %}
+</div>
+
+<script src="{{ url_for('static', filename='chores.js') }}"></script>
+{% endblock %}

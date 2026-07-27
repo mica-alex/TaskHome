@@ -1240,3 +1240,27 @@ main:focus-visible { outline: none; }
 /* A day with no prints still gets a hairline, so the axis reads as a timeline
  * rather than stopping where the data does. */
 .sparkline .bar.is-empty { fill: var(--mica-divider); }
+
+/* --- Chore charts (P5-2 #12) --------------------------------------------- */
+
+/* The page a printed QR leads to. Looked at once, by a child, holding a
+ * receipt -- so it is large and says one thing. */
+.chore-done { text-align: center; padding: var(--mica-space-8) var(--mica-space-4); }
+.chore-tick {
+    font-size: 72px; line-height: 1;
+    color: var(--mica-success, hsl(150, 60%, 45%));
+}
+.chore-done.is-already .chore-tick { color: var(--mica-text-secondary); }
+.chore-done h1 { margin: var(--mica-space-3) 0; }
+.chore-streak { font-size: var(--mica-text-h5); font-weight: 600; margin: 0; }
+
+.link-button {
+    all: unset; cursor: pointer; color: var(--mica-accent);
+    text-decoration: underline; font-size: inherit;
+}
+.link-button:focus-visible { outline: 2px solid var(--mica-accent); outline-offset: 2px; }
+
+.badge-chores { background: color-mix(in srgb, hsl(280, 60%, 55%) 22%, transparent); }
+.badge-transit { background: color-mix(in srgb, hsl(175, 60%, 45%) 22%, transparent); }
+.badge-github { background: color-mix(in srgb, hsl(220, 10%, 55%) 26%, transparent); }
+.badge-mqtt { background: color-mix(in srgb, hsl(15, 70%, 55%) 22%, transparent); }

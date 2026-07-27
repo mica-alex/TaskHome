@@ -483,6 +483,63 @@ def print_list(list_id):
     return fail('Printer not connected -- the list was queued.', 503)
 
 
+# --- chore charts (P5-2 #12) --------------------------------------------------
+
+@bp.route('/chores', methods=['POST'])
+def create_person():
+    from .. import chores
+    try:
+        return ok(chores.add_person((body() or {}).get('name')), 201)
+    except ValueError as e:
+        return fail(str(e))
+
+
+@bp.route('/chores/<person_id>', methods=['PATCH', 'DELETE'])
+def modify_person(person_id):
+    from .. import chores
+    try:
+        if request.method == 'DELETE':
+            chores.remove_person(person_id)
+            return ok({'deleted': person_id})
+        payload = body() or {}
+        return ok(chores.update_person(
+            person_id, name=payload.get('name'), days=payload.get('days'),
+            chores=payload.get('chores'), rotate=bool(payload.get('rotate'))))
+    except ValueError as e:
+        return fail(str(e), 404 if 'No such' in str(e) else 400)
+
+
+@bp.route('/chores/<person_id>/done', methods=['POST', 'DELETE'])
+def set_person_done(person_id):
+    from .. import chores
+    try:
+        person = (chores.undo_done(person_id) if request.method == 'DELETE'
+                  else chores.mark_done(person_id))
+    except ValueError as e:
+        return fail(str(e), 404)
+    return ok({'streak': chores.streak(person),
+               'done_today': chores.done_today(person)})
+
+
+@bp.route('/chores/<person_id>/print', methods=['POST'])
+def print_chore_chart(person_id):
+    from .. import chores, printing, queue
+    person = chores.get_person(person_id)
+    if person is None:
+        return fail('No such person.', 404)
+    blocks = chores.chart_blocks(person)
+    history = {'type': 'chores', 'id': person['id'], 'category': 'Chore chart',
+               'title': person.get('name', ''),
+               'print_time': __import__('datetime').datetime.now().isoformat()}
+    if printing.print_blocks(blocks):
+        printing.record_history(history)
+        return ok({'printed': True})
+    queue.enqueue('chores', blocks,
+                  description=f"Chore chart: {person.get('name', '')}",
+                  history=history)
+    return fail('Printer not connected -- the chart was queued.', 503)
+
+
 @bp.route('/scheduler', methods=['GET'])
 def scheduler_info():
     """What the scheduler is about to do, which is otherwise only visible by

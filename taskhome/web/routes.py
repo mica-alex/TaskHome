@@ -494,6 +494,45 @@ def api_template_test_print(kind):
 
 # --- print queue (P6-3) -------------------------------------------------------
 
+@bp.route('/c/<token>')
+def chore_done(token):
+    """Mark a chore chart done. This is what the printed QR points at (P5-2 #12).
+
+    Deliberately unauthenticated beyond the token in the URL: it is scanned
+    from paper by a child on a home LAN, and demanding a password there means
+    the feature is never used. Marking done is idempotent and non-destructive,
+    so the worst outcome is a chore ticked off by someone else on your network.
+
+    A short URL (/c/...) because it becomes a QR code, and every character adds
+    modules to the symbol.
+    """
+    from .. import chores
+    person = chores.by_token(token)
+    if person is None:
+        return render_template('chore_done.html', config=state.config,
+                               person=None), 404
+
+    already = chores.done_today(person)
+    if not already:
+        chores.mark_done(person['id'])
+        person = chores.get_person(person['id'])
+        log.info(f"Chore chart marked done: {person.get('name')}")
+    return render_template('chore_done.html', config=state.config, person=person,
+                           already=already, streak=chores.streak(person),
+                           best=chores.best_streak(person))
+
+
+@bp.route('/chores')
+def chore_charts():
+    from .. import chores
+    people = [dict(p, streak=chores.streak(p), best=chores.best_streak(p),
+                   done_today=chores.done_today(p),
+                   done_url=chores.done_url(p))
+              for p in chores.load_people()]
+    return render_template('chores.html', config=state.config, people=people,
+                           weekdays=chores.WEEKDAYS)
+
+
 @bp.route('/lists')
 def checklists():
     """Checklists (P5-2 #11). A mini-app rather than a listener: nothing polls
