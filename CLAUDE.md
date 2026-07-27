@@ -83,9 +83,9 @@ before fixing bugs or adding features.
 
 ## Ground rules
 
-- **The user's live data is in `data/`**: `config.json`, `tasks.json`,
-  `history.json`, `listeners.json`, `queue.json`, plus `cache/`, `backups/`
-  and `styles/`. Gitignored on purpose. `queue.json` holds receipts that have
+- **The user's live data is in `data/taskhome.db`** (SQLite), plus `cache/`,
+  `backups/` and `styles/`. Gitignored on purpose. JSON files from before the
+  P1-2 migration survive as `*.imported-<timestamp>` and are never deleted. `queue.json` holds receipts that have
   not printed yet, so deleting it loses paper. **Set `TASKHOME_DATA_DIR` to a
   scratch copy for any experimental run.** An override means *the data lives
   here*, not *go and fetch it from the repo root* — getting that backwards
@@ -159,7 +159,8 @@ before fixing bugs or adding features.
 | `taskhome/__init__.py` | `create_app()`, blueprint registration, dev template reload |
 | `taskhome/constants.py` | Paths, `DATA_DIR`, `VERSION`, `DEFAULT_CONFIG`, USB ids |
 | `taskhome/state.py` | The only mutable state, plus `STATE_LOCK` |
-| `taskhome/storage.py` | Atomic writes, load-failure tracking, migrations, backups |
+| `taskhome/db.py` | SQLite backend, schema, JSON import/export |
+| `taskhome/storage.py` | Store API over SQLite; load-failure tracking, backups |
 | `taskhome/scheduler.py` | The 60-second tick and catch-up |
 | `taskhome/recurrence.py` | `calculate_next`, `advance_schedule`, catch-up policy |
 | `taskhome/queue.py` | Durable print queue: backoff, parking, ordered drain |

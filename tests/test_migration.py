@@ -211,7 +211,10 @@ def test_load_data_migrates_then_reads(tmp_path, monkeypatch):
     assert taskhome.state.tasks[0]['title'] == 'Feed cat'
     assert taskhome.state.config['hostname'] == 'printer.local'
     assert taskhome.state.config['max_history'] == 500  # merged from defaults
-    assert (data / 'tasks.json').exists()
+    # P1-9 moves the file into data/; P1-2 then imports it into SQLite and
+    # renames it. What matters is that the data arrived, not where it sits.
+    assert taskhome.db.exists()
+    assert any(f.name.startswith('tasks.json.imported-') for f in data.iterdir())
     assert not (legacy / 'tasks.json').exists()
 
 

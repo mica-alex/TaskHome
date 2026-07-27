@@ -34,6 +34,9 @@ def build_parser():
     parser.add_argument('--check', action='store_true',
                         help='Report health and exit; 0 if healthy, 1 if not.')
     parser.add_argument('--version', action='store_true', help='Print the version and exit.')
+    parser.add_argument('--export-json', metavar='DIR',
+                        help='Write every store back out as JSON and exit. '
+                             'Backup symmetry with the automatic import.')
     return parser
 
 
@@ -54,6 +57,9 @@ def main(argv=None):
         print(f'taskhome {constants.VERSION}')
         return 0
 
+    if args.export_json:
+        return _export(args.export_json)
+
     if args.check:
         return _check()
 
@@ -69,6 +75,17 @@ def main(argv=None):
     if args.no_scheduler:
         print('Scheduler disabled: nothing will print on its own.', file=sys.stderr)
     app.run(host=host, port=port)
+    return 0
+
+
+def _export(directory):
+    """Dump the database back to JSON, so a backup is readable without sqlite."""
+    from . import create_app, db
+    create_app(load=True, with_scheduler=False)
+    written = db.export_json(directory)
+    for path in written:
+        print(path)
+    print(f'{len(written)} file(s) written to {directory}')
     return 0
 
 

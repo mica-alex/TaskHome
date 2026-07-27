@@ -113,13 +113,98 @@ def migrate_legacy_data_files(legacy_dir=None, data_dir=None):
     return actions
 
 
+#: Store names that live in the database rather than in a file. Caches
+#: (`nws-zones`, SCF request types) are deliberately absent: they are derived
+#: data, safe to delete, and have no business in the datastore.
+DB_STORES = ('config', 'state.config', 'tasks', 'history', 'listeners',
+             'queue', 'lists', 'chores')
+
+
+def use_db():
+    """Whether the SQLite backend is active.
+
+    True once the database exists. Migration creates it, so this flips exactly
+    once, on the first start after upgrading.
+    """
+    from . import db
+    return db.exists()
+
+
+def _db_key(name):
+    # load_data() reads config under the name 'state.config' for its error
+    # messages; the store itself is 'config'.
+    return 'config' if name == 'state.config' else name
+
+
+def migrate_to_database():
+    """Move a JSON datastore into SQLite, once (P1-2).
+
+    Runs before anything is read. Does nothing if the database already exists,
+    so this is a one-way door that opens exactly once.
+
+    Handles both layouts: `data/` as it is now, and the repo root as it was
+    before P1-9, for an install that skipped straight from the old version.
+    Nothing is deleted -- the JSON is renamed `*.imported-<timestamp>`.
+    """
+    from . import db
+    if db.exists():
+        return None
+    source = db.find_json_source()
+    if not source:
+        # A genuinely fresh install. Touch the database so the backend is
+        # active from the first write rather than the second start.
+        db.connect()
+        log.info(f'Created a new database at {db.db_path()}')
+        return None
+
+    log.info(f'Migrating the JSON datastore at {source} into SQLite')
+    report = db.migrate_from_json(source)
+
+    if report['failed']:
+        # All or nothing. A half-migrated database is worse than none: it
+        # exists, so the backend switches to it, the store that failed to
+        # import reads as empty, nothing is marked as failed, and the next
+        # save writes that emptiness over the only surviving copy. That is
+        # precisely the P0-5 chain, reintroduced at the migration boundary.
+        #
+        # Discarding it means the JSON path stays active, the corrupt file is
+        # detected there as it always was, and writes to it stay blocked --
+        # and the migration is retried on the next start, failing just as
+        # loudly, until someone fixes the file.
+        db.discard()
+        log.error(
+            f"Migration abandoned: {', '.join(report['failed'])} did not "
+            f"parse. Nothing was moved and the database was removed, so "
+            f"TaskHome is still reading JSON. Fix the file and restart.")
+        report['abandoned'] = True
+    return report
+
+
 def _load_json_file(name, path, default):
-    """Load one JSON file. Returns (value, ok).
+    """Load one store. Returns (value, ok).
 
     A missing file is fine — it yields the default and ok=True. A file that
     exists but won't parse is NOT fine: it returns ok=False so that saves are
     blocked rather than silently overwriting the user's data with defaults.
     """
+    if name in DB_STORES and use_db():
+        from . import db
+        key = _db_key(name)
+        try:
+            if key == 'tasks':
+                return db.get_tasks(), True
+            if key == 'history':
+                return db.get_history(), True
+            value = db.get_kv(key)
+            return (default if value is None else value), True
+        except Exception as e:
+            # A database that will not read is the same class of problem as a
+            # JSON file that will not parse: block writes rather than
+            # overwrite what might be recoverable.
+            log.error(f"FAILED to load {name} from the database: {e}")
+            state.load_failed.add(name)
+            return default, False
+
     if not os.path.exists(path):
         log.warning(f"{name} file not found: {path}")
         return default, True
@@ -143,6 +228,7 @@ def load_data():
 
     # Must run before anything reads or writes: it decides where the files are.
     migrate_legacy_data_files()
+    migrate_to_database()
     try:
         os.makedirs(constants.DATA_DIR, exist_ok=True)
     except OSError as e:
@@ -222,9 +308,27 @@ def _save_json_file(name, path, data):
     """
     if name in state.load_failed:
         log.error(
-            f"Refusing to save {name}: its file failed to load, so writing "
+            f"Refusing to save {name}: it failed to load, so writing "
             f"would destroy recoverable data. Fix {path} and restart.")
         return False
+
+    if name in DB_STORES and use_db():
+        from . import db
+        key = _db_key(name)
+        try:
+            with state.STATE_LOCK:
+                # Snapshot inside the lock for the same reason the JSON path
+                # serialises inside it: a concurrent append to the live list
+                # would otherwise be read half-written.
+                snapshot = list(data) if isinstance(data, list) else dict(data)
+            if key == 'tasks':
+                return db.set_tasks(snapshot)
+            if key == 'history':
+                return db.set_history(snapshot)
+            return db.set_kv(key, snapshot)
+        except Exception as e:
+            log.error(f"Failed to save {name} to the database: {e}")
+            return False
     # Snapshot what is about to be replaced, before replacing it.
     backup_store(name, path)
 

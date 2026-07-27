@@ -18,14 +18,17 @@ from .settings import get_host, get_port
 # and so on resolve after a plain `import taskhome`. This is only safe because
 # importing them has no side effects -- no files read, no threads started, no
 # hardware touched. Keep it that way.
-from . import layouts, receipt, recurrence, printing, queue, scheduler, storage, styles
+from . import (chores, db, layouts, lists, receipt, recurrence, printing,
+               queue, scheduler, storage, styles)
 from . import listeners, settings, web, logsetup
 
 __all__ = [
     'create_app', 'init_app', 'get_host', 'get_port', 'log',
-    # Re-exported so `import taskhome` gives access to every module.
+    # Re-exported so `import taskhome` gives access to every module. Listing
+    # them here is also what tells pyflakes the imports are deliberate.
     'constants', 'state', 'storage', 'recurrence', 'printing', 'scheduler',
-    'receipt', 'layouts', 'listeners', 'queue', 'settings', 'styles', 'web', 'logsetup',
+    'receipt', 'layouts', 'listeners', 'queue', 'settings', 'styles', 'web',
+    'logsetup', 'chores', 'db', 'lists',
 ]
 
 

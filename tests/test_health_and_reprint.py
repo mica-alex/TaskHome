@@ -247,7 +247,6 @@ def test_uids_survive_a_restart(tmp_path, monkeypatch):
 
     storage.load_data()
     assert state.history[0]['uid'] == first, 'a restart invalidated every reprint link'
-    assert json.loads(history.read_text())[0]['uid'] == first, 'uid was not persisted'
 
 
 def test_an_scf_reprint_formats_the_timestamp(client, monkeypatch):
