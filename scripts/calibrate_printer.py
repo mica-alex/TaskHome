@@ -46,6 +46,51 @@ def ruler(width=64):
     return ''.join(out)
 
 
+SAMPLE = ('Descenders like g, j, p, q and y are what touch the line below, '
+          'so this sample deliberately contains plenty of them: judgy pygmy '
+          'paging quietly.')
+
+
+def spacing_strip():
+    """Print the same paragraph at a range of leading values.
+
+    The character cell height is documented as 17 dots for font b, but the
+    printed result at 10 dots of leading still read as touching -- so the
+    documented figure does not match what the head actually lays down. Rather
+    than keep guessing, print the options and measure by eye.
+    """
+    import receipt
+
+    print('Printing line-spacing test strip...')
+    try:
+        with taskhome.open_printer() as p:
+            p.line_spacing()
+            p.set(align='center', font='a', bold=True, custom_size=True,
+                  width=1, height=1)
+            p.text('LINE SPACING TEST\n')
+            for leading in (6, 10, 14, 18, 22, 26):
+                total = receipt.FONTS['b']['cell_h'] + leading
+                p.line_spacing()
+                p.set(align='left', font='a', bold=True, custom_size=True,
+                      width=1, height=1)
+                p.text(f'-- leading {leading} dots ({total} total) --\n')
+                p.line_spacing(receipt.spacing_units(total))
+                p.set(align='left', font='b', bold=False, custom_size=True,
+                      width=1, height=1)
+                for wrapped in receipt.wrap(SAMPLE, receipt.columns_for('b')):
+                    p.text(wrapped + '\n')
+            p.line_spacing()
+            p.set(align='center', font='b', custom_size=True, width=1, height=1)
+            p.text('\nPick the smallest that reads cleanly.\n\n')
+            p.cut()
+    except Exception as e:
+        print(f'Spacing strip failed: {e}')
+        return 1
+    print('Done. Tell me which leading value looks right; it becomes '
+          'receipt.LEADING_DOTS.')
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -53,6 +98,11 @@ def main():
                     help='required: acknowledges this produces physical paper')
     ap.add_argument('--minimal', action='store_true',
                     help='only the two font rulers (~5cm instead of ~15cm)')
+    ap.add_argument('--spacing', action='store_true',
+                    help='print a line-spacing test strip: the same paragraph '
+                         'at several leading values, labelled, so the most '
+                         'readable one can be chosen by eye rather than by '
+                         'arithmetic')
     ap.add_argument('--width', type=int, default=64,
                     help='ruler length in characters (default 64). Font B is '
                          'wider than 64 on the TM-T20IIIL, so use --width 96 '
@@ -66,6 +116,9 @@ def main():
         print('Printer not detected at '
               f'{taskhome.VID:04x}:{taskhome.PID:04x}. Nothing printed.')
         return 1
+
+    if args.spacing:
+        return spacing_strip()
 
     line = ruler(args.width)
     print('Printing calibration receipt...')

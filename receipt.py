@@ -38,11 +38,18 @@ SPACING_DIVISOR = 180          # ESC 3 n sets n/180 inch; the widely supported o
 # so a 2x title had the next line printed into its descenders. Spacing is
 # therefore computed per block from the actual cell height.
 #
-# The value is empirical, from looking at printed paper: 6 dots was measurably
-# too tight -- adjacent font b lines touched -- while the 17 dots implied by
-# the factory default is more air than a compact receipt wants. 10 keeps body
-# text clearly separated and still saves height on every line.
-LEADING_DOTS = 10
+# The value is empirical, from printed paper, and the arithmetic proved
+# unreliable: at 10 dots of leading over a documented 17-dot font b cell there
+# should have been a clear 10-dot gap, yet the lines still read as touching.
+# The documented cell height evidently understates what the head actually lays
+# down -- likely the glyph box excludes some of the descender travel -- so the
+# real gap is roughly 7 dots smaller than the model suggests.
+#
+# Provisional until the test strip is read
+# (`scripts/calibrate_printer.py --confirm --spacing`), which prints this
+# paragraph at 6/10/14/18/22/26 so the smallest readable value can be chosen
+# by eye instead of by arithmetic.
+LEADING_DOTS = 14
 
 # Feed used around a QR image. The symbol itself already carries a 1-module
 # quiet zone (python-escpos builds it with border=1), so the visible gap was
