@@ -397,3 +397,46 @@ def test_density_passes_through_when_set():
 
 def test_per_block_leading_override():
     assert r.line_dots(r.text('x', font='a', height=3, leading=30)) == 24 * 3 + 30
+
+
+# --- HTML preview (P3-4) ------------------------------------------------------
+
+def test_html_preview_draws_each_line_once():
+    """The text renderer repeats a line per height multiplier to represent
+    vertical space. On screen that read as the title printing twice -- the
+    printer prints it once, taller. HTML scales instead."""
+    rows = r.render_html([r.text('Play with Sara', font='a', width=2, height=2)])
+    texts = [row['text'] for row in rows if row['kind'] == 'text']
+    assert texts == ['Play with Sara']
+    assert rows[0]['h'] == 2
+
+
+def test_html_preview_scales_by_column_ratio():
+    """A 24-column title must occupy the same paper width as a 64-column body
+    line, so its characters are 64/24 wider."""
+    title = r.render_html([r.text('x', font='a', width=2)])[0]
+    body = r.render_html([r.text('x', font='b', width=1)])[0]
+    assert title['scale'] == pytest.approx(r.PAGE_COLUMNS / 24)
+    assert body['scale'] == pytest.approx(1.0)
+
+
+def test_html_preview_wraps_like_the_printer():
+    long_text = 'word ' * 40
+    rows = r.render_html([r.text(long_text, font='b')])
+    assert [row['text'] for row in rows] == r.wrap(long_text, 64)
+
+
+def test_html_preview_covers_every_block_type():
+    blocks = [r.qr('https://example.com'), r.text('hi'), r.rule(),
+              r.gap(6), r.blank(), r.barcode('123')]
+    kinds = {row['kind'] for row in r.render_html(blocks)}
+    assert kinds == {'qr', 'text', 'gap', 'blank', 'barcode'}
+
+
+def test_html_and_text_previews_come_from_the_same_blocks():
+    """Two renderers, one input -- the anti-drift property."""
+    blocks = layouts.task_receipt(TASK, URL)
+    html_text = [row['text'] for row in r.render_html(blocks) if row['kind'] == 'text']
+    plain = [line.strip() for line in r.render_text(blocks) if line.strip()]
+    for line in html_text:
+        assert line in plain, f'{line!r} appears in the HTML preview but not the text one'

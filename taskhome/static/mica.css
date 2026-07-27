@@ -219,6 +219,23 @@ select.mica-input,
   appearance: auto;
 }
 
+/* Checkboxes and radios are not text controls: the block display and fixed
+   height above turned "Enabled" into a checkbox with its label on the next
+   line. They size themselves and sit inline with their text. */
+.mica-field input[type="checkbox"],
+.mica-field input[type="radio"] {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  flex: none;
+}
+
+/* A field whose control is a checkbox lays out as a row, not a column. */
+.mica-field:has(> label > input[type="checkbox"]),
+.mica-field.is-checkbox { flex-direction: row; align-items: center; gap: var(--mica-space-2); }
+
 /* Textareas and multi-line controls opt out of the fixed height. */
 .mica-input[type="search"] { padding: 0 12px; }
 textarea.mica-input,
@@ -327,7 +344,21 @@ textarea.mica-input,
  * like a web page. The width is driven by the measured column count, so the
  * preview wraps where the printer wraps.
  */
+/*
+ * The receipt preview.
+ *
+ * Sized as real paper: the body is a fixed 64-character grid at the base font,
+ * and each line scales by page_columns / its own column count -- so a
+ * 24-column title occupies exactly the paper width it will in reality. Height
+ * multipliers stretch vertically, because ESC/POS scales the two axes
+ * independently.
+ *
+ * The line is drawn ONCE. The text renderer repeats it per height multiplier
+ * to represent vertical space, which on screen read as the title printing
+ * twice; the printer prints it once, taller.
+ */
 .receipt-paper {
+  --rp-base: 11px;
   background: #fafaf8;
   color: #111;
   border: 1px solid var(--mica-divider);
@@ -337,14 +368,61 @@ textarea.mica-input,
   box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.06);
 }
 
-.receipt-paper pre {
+.receipt-body {
   font-family: var(--mica-font-mono);
-  font-size: 11px;
+  font-size: var(--rp-base);
   line-height: 1.25;
-  margin: 0;
-  white-space: pre;
-  color: inherit;
+  /* 64 base characters wide, which is the paper. */
+  width: 64ch;
+  margin: 0 auto;
 }
+
+.r-line {
+  font-size: calc(var(--rp-base) * var(--scale, 1));
+  line-height: 1.15;
+  white-space: pre;
+}
+
+/* Vertical multiplier, applied relative to the horizontal one already baked
+   into font-size. Scaling the span keeps the row's own height honest. */
+.r-line > span {
+  display: inline-block;
+  transform: scaleY(calc(var(--h, 1) / var(--w, 1)));
+  transform-origin: center top;
+}
+
+.r-line.r-center { text-align: center; }
+.r-line.r-left { text-align: left; }
+.r-line.r-right { text-align: right; }
+.r-line.r-bold { font-weight: 700; }
+
+.r-blank { height: 1.15em; }
+.r-gap { height: calc(var(--dots, 8) * 0.125mm); }
+
+.r-qr {
+  /* modules x size dots, converted at 8 dots per mm. */
+  width: calc(var(--modules) * var(--size) * 0.125mm);
+  height: calc(var(--modules) * var(--size) * 0.125mm);
+  margin: 2px auto;
+  border: 1px solid #111;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  color: #555;
+}
+
+.r-barcode {
+  height: calc(var(--bh, 60) * 0.125mm);
+  margin: 2px auto;
+  background: repeating-linear-gradient(90deg, #111 0 2px, transparent 2px 5px);
+  display: grid;
+  place-items: end center;
+  font-size: 9px;
+  color: #111;
+  max-width: 60%;
+}
+
+.r-barcode span { background: #fafaf8; padding: 0 2px; }
 
 /* Paper stays light in dark mode: a black receipt would misrepresent it. */
 :root[data-theme='dark'] .receipt-paper { background: #f2f1ec; }
@@ -581,6 +659,10 @@ header.mica-appbar .mica-brand img { height: 26px; }
   white-space: nowrap;
   color: #fff;
 }
+
+/* Two badges can appear together (Active + "335 missed"); without a gap they
+   sit flush against each other. */
+.status-badges { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; }
 
 .badge-active   { background-color: var(--mica-green-500); }
 .badge-disabled { background-color: var(--mica-gray-500); }

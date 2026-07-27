@@ -1,12 +1,18 @@
 {#
-  Task status badge. A task can be off for three quite different reasons, and
-  conflating them is what made P0-13 painful: a task disabled by a schedule
-  error looked identical to one the user switched off.
+  Task status badge(s).
+
+  A task can be off for three quite different reasons, and conflating them is
+  what made P0-13 painful: one disabled by a schedule error looked identical to
+  one the user switched off.
 
   - Missed:   a one-off whose time passed while TaskHome was down (P1-10).
   - Error:    its recurrence can't be advanced; the scheduler disabled it.
   - Disabled: the user turned it off.
+
+  Wrapped in a flex row because an active task with missed occurrences shows
+  two badges, and stacked block elements sit flush against each other.
 #}
+<span class="status-badges">
 {% if task.schedule_error %}
     <span class="badge-status badge-error" title="{{ task.schedule_error }}">Error</span>
 {% elif task.missed %}
@@ -21,3 +27,4 @@
               title="Last missed {{ task.last_missed_at }}">{{ task.missed_count }} missed</span>
     {% endif %}
 {% endif %}
+</span>

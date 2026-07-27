@@ -17,9 +17,9 @@
 
   <form method="POST" action="{{ url_for('main.listener') }}" id="scf-form">
     <div class="mica-field">
-      <label>
+      <label class="mica-checkbox">
         <input type="checkbox" name="enabled" {% if scf.enabled %}checked{% endif %}>
-        Enabled
+        <span>Enabled</span>
       </label>
     </div>
 

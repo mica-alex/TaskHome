@@ -67,7 +67,11 @@
 
   <div class="mica-card studio-preview">
     <h2 class="mica-card-title">Preview</h2>
-    <div class="receipt-paper"><pre id="preview-lines">{{ preview.lines | join('\n') }}</pre></div>
+    <div class="receipt-paper">
+      <div class="receipt-body" id="preview-body">
+        {% include 'partials/receipt_rows.html' %}
+      </div>
+    </div>
     <p class="mica-help" id="preview-meta">
       {{ preview.height_mm }} mm &middot; {{ preview.columns }} columns
     </p>

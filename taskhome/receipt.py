@@ -375,3 +375,63 @@ def preview(blocks, page_width=PAGE_COLUMNS, border=True, proportional=False):
     body = '\n'.join(f'| {line:<{page_width}} |' for line in lines)
     footer = f'{height_mm(blocks):.0f} mm ({total_height(blocks)} dots)'
     return f'{edge}\n{body}\n{edge}\n{footer}'
+
+
+# --- HTML preview -------------------------------------------------------------
+
+def render_html(blocks, page_columns=PAGE_COLUMNS):
+    """Render blocks to HTML for the browser preview (P3-4).
+
+    The text renderer repeats a line once per height multiplier to represent
+    vertical space. That is fine for a terminal, but on screen it reads as the
+    title being printed twice -- which is not what the printer does; it prints
+    it once, taller. HTML can scale instead.
+
+    Sizing is derived, not guessed. A line's font size is scaled by
+    `page_columns / columns_for(font, width)`, so a block that fits 24 columns
+    occupies exactly the same paper width as one that fits 64. Height is
+    applied on top as a vertical stretch, because ESC/POS scales width and
+    height independently.
+
+    Returns a list of {'kind', 'html'} rows so the caller can style them.
+    """
+    rows = []
+    for block in blocks:
+        kind = block['type']
+        if kind == 'blank':
+            for _ in range(block.get('count', 1)):
+                rows.append({'kind': 'blank', 'text': '', 'w': 1, 'h': 1,
+                             'align': 'center', 'bold': False, 'scale': 1.0})
+        elif kind == 'gap':
+            rows.append({'kind': 'gap', 'dots': block.get('dots', 8)})
+        elif kind == 'qr':
+            rows.append({'kind': 'qr',
+                         'modules': qr_modules(block['value']),
+                         'size': block.get('size', 4),
+                         'value': block['value']})
+        elif kind == 'barcode':
+            rows.append({'kind': 'barcode', 'value': str(block['value']),
+                         'height': block.get('height', 60)})
+        elif kind == 'rule':
+            font = block.get('font', 'b')
+            cols = columns_for(font)
+            rows.append({'kind': 'text', 'text': block.get('char', '-') * cols,
+                         'w': 1, 'h': 1, 'align': 'center', 'bold': False,
+                         'scale': page_columns / cols})
+        elif kind == 'text':
+            font = block.get('font', 'b')
+            width = max(int(block.get('width', 1) or 1), 1)
+            height = max(int(block.get('height', 1) or 1), 1)
+            cols = columns_for(font, width)
+            for line in wrap(block['value'], cols):
+                rows.append({
+                    'kind': 'text',
+                    'text': line,
+                    'w': width,
+                    'h': height,
+                    'align': block.get('align', 'center'),
+                    'bold': bool(block.get('bold')),
+                    # How much wider each character is than the base grid.
+                    'scale': page_columns / cols,
+                })
+    return rows

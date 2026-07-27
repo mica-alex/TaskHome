@@ -335,6 +335,9 @@ def preview(template, context=None):
     template = validate_template(template)
     blocks = fill(template, context or sample_context(template['kind']))
     return {
+        # `rows` drives the on-screen preview; `lines` is the plain-text form,
+        # kept for tooling and tests. Both come from the same blocks.
+        'rows': receipt.render_html(blocks),
         'lines': receipt.render_text(blocks),
         'height_mm': round(receipt.height_mm(blocks), 1),
         'height_dots': receipt.total_height(blocks),

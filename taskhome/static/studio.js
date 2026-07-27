@@ -14,7 +14,7 @@
   var KIND = new URLSearchParams(location.search).get('kind') || 'task';
   var template = JSON.parse(document.getElementById('template-data').textContent);
   var blocksEl = document.getElementById('blocks');
-  var previewEl = document.getElementById('preview-lines');
+  var previewEl = document.getElementById('preview-body');
   var metaEl = document.getElementById('preview-meta');
   var errorEl = document.getElementById('preview-error');
   var lastFocused = null;
@@ -136,6 +136,45 @@
     schedulePreview();
   }
 
+  /*
+   * Paint the rows the server produced. Deliberately dumb: it sets text and a
+   * couple of custom properties and nothing else. Any measuring or wrapping
+   * here would be a second renderer that can disagree with the printer.
+   */
+  function drawPreview(rows) {
+    previewEl.innerHTML = '';
+    rows.forEach(function (row) {
+      var node = document.createElement('div');
+      if (row.kind === 'text') {
+        node.className = 'r-line r-' + (row.align || 'center') + (row.bold ? ' r-bold' : '');
+        node.style.setProperty('--scale', row.scale);
+        node.style.setProperty('--h', row.h);
+        node.style.setProperty('--w', row.w);
+        var span = document.createElement('span');
+        span.textContent = row.text;
+        node.appendChild(span);
+      } else if (row.kind === 'qr') {
+        node.className = 'r-qr';
+        node.style.setProperty('--modules', row.modules);
+        node.style.setProperty('--size', row.size);
+        node.title = row.value;
+        node.appendChild(document.createTextNode('QR'));
+      } else if (row.kind === 'barcode') {
+        node.className = 'r-barcode';
+        node.style.setProperty('--bh', row.height);
+        var label = document.createElement('span');
+        label.textContent = row.value;
+        node.appendChild(label);
+      } else if (row.kind === 'gap') {
+        node.className = 'r-gap';
+        node.style.setProperty('--dots', row.dots);
+      } else {
+        node.className = 'r-blank';
+      }
+      previewEl.appendChild(node);
+    });
+  }
+
   var timer = null;
   function schedulePreview() {
     clearTimeout(timer);
@@ -150,7 +189,7 @@
       body: JSON.stringify({template: template})
     }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.ok) {
-        previewEl.textContent = data.lines.join('\n');
+        drawPreview(data.rows);
         metaEl.textContent = data.height_mm + ' mm · ' + data.columns + ' columns';
         errorEl.hidden = true;
       } else {

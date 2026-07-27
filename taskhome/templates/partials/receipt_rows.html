@@ -1,0 +1,28 @@
+{#
+  One row per printed line (P3-4).
+
+  `scale` is how much wider each character is than the 64-column base grid, so
+  a 24-column title occupies exactly the paper width it will on paper. `h` is
+  the vertical multiplier, applied as a stretch because ESC/POS scales width
+  and height independently.
+
+  Crucially the line appears ONCE. The text renderer repeats it per height
+  multiplier to represent vertical space, which on screen read as the title
+  printing twice -- the printer prints it once, taller.
+#}
+{% for row in preview.rows %}
+  {% if row.kind == 'text' %}
+    <div class="r-line r-{{ row.align }}{{ ' r-bold' if row.bold }}"
+         style="--scale: {{ row.scale }}; --h: {{ row.h }}; --w: {{ row.w }}"
+      ><span>{{ row.text }}</span></div>
+  {% elif row.kind == 'qr' %}
+    <div class="r-qr" style="--modules: {{ row.modules }}; --size: {{ row.size }}"
+         title="{{ row.value }}"><span>QR</span></div>
+  {% elif row.kind == 'barcode' %}
+    <div class="r-barcode" style="--bh: {{ row.height }}"><span>{{ row.value }}</span></div>
+  {% elif row.kind == 'gap' %}
+    <div class="r-gap" style="--dots: {{ row.dots }}"></div>
+  {% else %}
+    <div class="r-blank"></div>
+  {% endif %}
+{% endfor %}
