@@ -44,7 +44,12 @@ Two caveats:
 past "now" so stale occurrences don't all fire at once. Actual semantics:
 
 - **Missed occurrences are skipped, not printed.** If the machine was off at
-  21:00, the 21:00 task simply doesn't print that day.
+  21:00, the 21:00 task simply doesn't print that day. This is hardcoded and
+  unconfigurable today; MASTER_PLAN `P1-10` makes it a setting (global default
+  plus per-task override, with `skip` / `print_once` / `print_all` /
+  `print_if_recent`), and the miss becomes visible in the UI rather than
+  silent. Note that a missed **one-off** task doesn't just skip a day — it
+  never prints at all.
 - The comparison is done in a pseudo-UTC frame: the naive local `next_time` is
   force-tagged UTC (`.replace(tzinfo=timezone.utc)`, `app.py:311`) and compared
   to real UTC now. For a local zone at UTC-5, local `12:00` is treated as
