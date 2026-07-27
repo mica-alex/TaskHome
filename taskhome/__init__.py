@@ -39,12 +39,13 @@ def create_app(load=True, with_scheduler=False):
     would mean duplicate receipts. The entry point opts in explicitly.
     """
     from .web import bp
-    from .web import health, pwa
+    from .web import api, health, pwa
 
     app = Flask(__name__)
     app.register_blueprint(bp)
     app.register_blueprint(pwa.bp)
     app.register_blueprint(health.bp)
+    app.register_blueprint(api.bp)
 
 
     configure_logging()

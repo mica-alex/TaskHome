@@ -96,4 +96,80 @@
     wire('test-scf-print-btn', '{{ url_for("main.test_scf_print") }}', 'Test SCF print');
   })();
 </script>
+
+<div class="mica-card">
+  <div class="card-heading">
+    <h2 class="mica-card-title">Diagnostics</h2>
+    <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+            id="diag-refresh">Refresh</button>
+  </div>
+  <p class="mica-help">
+    Live from <code>/api/health</code> &mdash; the same thing an uptime monitor
+    or <code>deploy/healthcheck.sh</code> sees.
+  </p>
+  <dl class="status-list" id="diagnostics">
+    <dt>Loading&hellip;</dt><dd></dd>
+  </dl>
+</div>
+
+<script>
+  (function () {
+    'use strict';
+    var host = document.getElementById('diagnostics');
+    if (!host) return;
+
+    function line(term, value, bad) {
+      var dt = document.createElement('dt');
+      dt.textContent = term;
+      var dd = document.createElement('dd');
+      dd.textContent = value;
+      if (bad) dd.className = 'is-error';
+      host.appendChild(dt);
+      host.appendChild(dd);
+    }
+
+    function render(d) {
+      host.innerHTML = '';
+      line('Version', d.version);
+      line('Printer', d.printer.connected
+           ? 'Connected (' + d.printer.vendor_id + ':' + d.printer.product_id + ')'
+           : 'Not connected', false);   // not an error: the queue makes it survivable
+      var s = d.scheduler;
+      line('Scheduler', s.status + (s.age_seconds !== null
+           ? ' - last tick ' + s.age_seconds + 's ago, ' + s.ticks + ' ticks'
+           : ''), s.status === 'stalled');
+      line('Print queue', d.queue.waiting + ' waiting, ' + d.queue.parked
+           + ' parked (' + d.queue.paper_mm + ' mm)', d.queue.parked > 0);
+      line('Stored', d.stores.tasks + ' tasks, ' + d.stores.history + ' history records');
+      if (d.stores.failed.length) {
+        line('Write-blocked', d.stores.failed.join(', '), true);
+      }
+      Object.keys(d.listeners).forEach(function (name) {
+        var l = d.listeners[name];
+        line(l.title, l.enabled
+             ? (l.last_error ? 'Error: ' + l.last_error
+                             : 'On - last checked ' + (l.last_check || 'never'))
+             : 'Off', !!(l.enabled && l.last_error));
+      });
+      if (d.problems && d.problems.length) {
+        line('Needs attention', d.problems.join(' / '), true);
+      }
+    }
+
+    function load() {
+      // /api/health answers 503 when unhealthy, and that body is exactly what
+      // this panel is for -- so it must not be treated as a failed request.
+      fetch('/api/health')
+        .then(function (r) { return r.json(); })
+        .then(render)
+        .catch(function () {
+          host.innerHTML = '';
+          line('Error', 'Could not reach /api/health', true);
+        });
+    }
+
+    document.getElementById('diag-refresh').addEventListener('click', load);
+    load();
+  })();
+</script>
 {% endblock %}

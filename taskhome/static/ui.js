@@ -318,3 +318,109 @@
         }
     });
 })();
+
+/*
+ * Task row actions (MASTER_PLAN P2-2).
+ *
+ * All of these go through /api/tasks (P2-3) rather than form posts, so the row
+ * updates in place instead of reloading and losing the reader's position in a
+ * long list. The HTML forms still exist and still work with JavaScript off --
+ * a LAN appliance that cannot add a task without JS is a downgrade.
+ */
+(function () {
+    'use strict';
+
+    function api(path, options) {
+        return fetch('/api' + path, Object.assign({
+            headers: {'Content-Type': 'application/json'}
+        }, options || {})).then(function (r) {
+            return r.json().then(function (d) {
+                // The uniform envelope is what makes this one helper enough
+                // for every call.
+                if (!r.ok || !d.ok) throw new Error(d.error || 'Request failed.');
+                return d.data;
+            });
+        });
+    }
+
+    function row(id) { return document.querySelector('[data-task="' + id + '"]'); }
+
+    function closeMenus() {
+        document.querySelectorAll('.row-menu[open]').forEach(function (m) {
+            m.removeAttribute('open');
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+        // A menu left open behind a dialog, or two open at once, both look
+        // broken. Close on any click that is not inside one.
+        if (!e.target.closest('.row-menu')) closeMenus();
+
+        var toggle = e.target.closest('[data-toggle-task]');
+        if (toggle) return;   // handled on 'change'
+
+        var print = e.target.closest('[data-print-task]');
+        if (print) {
+            closeMenus();
+            if (!confirm('Print "' + print.dataset.title + '" now?')) return;
+            api('/tasks/' + print.dataset.printTask + '/print', {method: 'POST'})
+                // Says "does not change the schedule" because that is the
+                // question someone asks right after pressing it.
+                .then(function () { toast('Printed. The schedule is unchanged.'); })
+                .catch(function (err) { toast(err.message, 'error'); });
+            return;
+        }
+
+        var duplicate = e.target.closest('[data-duplicate-task]');
+        if (duplicate) {
+            closeMenus();
+            api('/tasks/' + duplicate.dataset.duplicateTask + '/duplicate', {method: 'POST'})
+                .then(function () {
+                    toast('Duplicated, and left paused so you can edit it.');
+                    location.reload();
+                })
+                .catch(function (err) { toast(err.message, 'error'); });
+            return;
+        }
+
+        var del = e.target.closest('[data-delete-task]');
+        if (del) {
+            closeMenus();
+            if (!confirm('Delete "' + del.dataset.title + '"? This cannot be undone.')) return;
+            api('/tasks/' + del.dataset.deleteTask, {method: 'DELETE'})
+                .then(function () {
+                    var tr = row(del.dataset.deleteTask);
+                    if (tr) tr.remove();
+                    toast('Deleted.');
+                })
+                .catch(function (err) { toast(err.message, 'error'); });
+        }
+    });
+
+    document.addEventListener('change', function (e) {
+        var toggle = e.target.closest('[data-toggle-task]');
+        if (!toggle) return;
+        var id = toggle.dataset.toggleTask;
+        var wanted = toggle.checked;
+
+        api('/tasks/' + id, {
+            method: 'PATCH',
+            body: JSON.stringify({enabled: wanted})
+        }).then(function (task) {
+            var tr = row(id);
+            if (tr) tr.classList.toggle('task-inactive', !task.enabled);
+            toast(task.enabled ? 'Resumed.' : 'Paused.');
+        }).catch(function (err) {
+            // Put the switch back. Leaving it showing a state the server
+            // rejected is how someone comes to believe a task is running when
+            // it is not.
+            toggle.checked = !wanted;
+            toast(err.message, 'error');
+        });
+    });
+
+    // Escape closes an open row menu, like every other menu on the platform.
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeMenus();
+    });
+})();

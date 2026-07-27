@@ -13,7 +13,7 @@ from .. import constants, printing, queue, receipt, state, storage, styles
 from ..listeners import base as listener_base, scf
 from ..settings import get_port  # module name would clash with the route
 from ..logsetup import log
-from . import forms, pagination
+from . import api, forms, pagination
 
 bp = Blueprint('main', __name__)
 
@@ -45,7 +45,7 @@ def index():
     # All state.tasks, not just enabled ones: a task disabled by a schedule error or
     # a missed one-off must stay visible (P0-13, and P1-10's promise that
     # skipping isn't vanishing). The template renders the status.
-    return render_template('index.html', status=status, config=state.config, tasks=state.tasks, history=recent_history)
+    return render_template('index.html', status=status, config=state.config, tasks=[api.task_view(t) for t in state.tasks], history=recent_history)
 
 
 @bp.route('/task_page')
@@ -56,7 +56,7 @@ def task_page():
     page = pagination.paginate(matched, request.args.get('page', 1),
                     request.args.get('per_page', pagination.DEFAULT_PAGE_SIZE))
     return render_template(
-        'tasks.html', config=state.config, tasks=state.tasks,
+        'tasks.html', config=state.config, tasks=[api.task_view(t) for t in state.tasks],
         history=page['items'], page=page,
         page_numbers=pagination.page_numbers(page['page'], page['pages']),
         query=query, kind=kind, total_history=len(state.history))
@@ -189,7 +189,7 @@ def edit_task(task_id):
             task.update(candidate)
         storage.save_tasks()
         return redirect(url_for('main.task_page'))
-    return render_template('tasks.html', config=state.config, tasks=state.tasks,
+    return render_template('tasks.html', config=state.config, tasks=[api.task_view(t) for t in state.tasks],
                            history=state.history, edit_task=task)
 
 

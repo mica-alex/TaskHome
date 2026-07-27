@@ -957,3 +957,53 @@ main:focus-visible { outline: none; }
         outline: 3px solid Highlight;
     }
 }
+
+/* --- Task rows (P2-2) ---------------------------------------------------- */
+
+.task-inactive { opacity: .55; }
+.task-inactive .task-title { text-decoration: line-through; }
+
+/* A real checkbox, restyled. Keeping the input rather than a div means
+ * keyboard focus, Space to toggle and correct announcement all come free. */
+.mica-switch { display: inline-flex; cursor: pointer; }
+.mica-switch input {
+    position: absolute; opacity: 0; width: 44px; height: 24px; margin: 0; cursor: pointer;
+}
+.mica-switch span {
+    width: 44px; height: 24px; border-radius: 999px; display: block;
+    background: var(--mica-divider); position: relative; transition: background .15s;
+}
+.mica-switch span::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--mica-bg-elevated); transition: transform .15s;
+    box-shadow: 0 1px 3px rgb(0 0 0 / .35);
+}
+.mica-switch input:checked + span { background: var(--mica-accent); }
+.mica-switch input:checked + span::after { transform: translateX(20px); }
+.mica-switch input:focus-visible + span { outline: 2px solid var(--mica-accent); outline-offset: 2px; }
+
+/* <details> as a menu: it opens on click and closes on Escape with no JS at
+ * all, so the script only has to handle click-outside. */
+.row-menu { position: relative; display: inline-block; }
+.row-menu summary { list-style: none; cursor: pointer; }
+.row-menu summary::-webkit-details-marker { display: none; }
+.row-menu-items {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+    min-width: 160px; padding: 4px;
+    background: var(--mica-bg-elevated);
+    border: 1px solid var(--mica-divider);
+    border-radius: var(--mica-radius-md, 8px);
+    box-shadow: 0 8px 24px rgb(0 0 0 / .28);
+    display: grid; gap: 2px;
+}
+.row-menu-items button {
+    all: unset; padding: 8px 12px; border-radius: 6px; cursor: pointer;
+    font-size: var(--mica-text-body); color: var(--mica-text-primary);
+}
+.row-menu-items button:hover { background: color-mix(in srgb, var(--mica-accent) 14%, transparent); }
+.row-menu-items button:focus-visible { outline: 2px solid var(--mica-accent); outline-offset: -2px; }
+.row-menu-items button.is-danger { color: var(--mica-error); }
+
+/* The last rows' menus would otherwise be clipped by the scroll container. */
+.mica-table-scroll:has(.row-menu[open]) { overflow: visible; }

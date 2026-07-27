@@ -11,32 +11,65 @@
     <table class="mica-table">
       <caption class="sr-only">Scheduled tasks</caption>
       <thead>
-        <tr><th>Title</th><th>Next Time</th><th>Repeats</th><th>Status</th><th>Actions</th></tr>
+        <tr>
+          <th>Title</th><th>Next print</th><th>Repeats</th><th>Last printed</th>
+          <th>On</th><th><span class="sr-only">Actions</span></th>
+        </tr>
       </thead>
       <tbody>
         {% for task in tasks %}
-        <tr class="{% if not task.enabled %}task-inactive{% endif %}">
+        <tr class="{% if not task.enabled %}task-inactive{% endif %}" data-task="{{ task.id }}">
           <td>
-            {{ task.title }}
+            <span class="task-title">{{ task.title }}</span>
             {% if task.extra %}<div class="mica-help">{{ task.extra }}</div>{% endif %}
+            {% include 'partials/task_status.html' %}
           </td>
-          <td>{% if task.enabled %}{% with value = task.next_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}{% else %}&mdash;{% endif %}</td>
-          <td>{{ task.recurring }}</td>
-          <td>{% include 'partials/task_status.html' %}</td>
+          <td>
+            {%- if task.enabled -%}
+              {% with value = task.next_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}
+            {%- else -%}
+              <span class="mica-help">Paused</span>
+            {%- endif -%}
+          </td>
+          <td><span class="mica-chip mica-chip-muted">{{ task.recurrence_label }}</span></td>
+          <td>
+            {%- if task.last_printed -%}
+              {% with value = task.last_printed, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}
+            {%- else -%}
+              <span class="mica-help">Never</span>
+            {%- endif -%}
+          </td>
+          <td>
+            {#
+              A real checkbox, not a styled div: it is keyboard reachable and
+              announced correctly for free (P2-7). The label names the task,
+              because a screen reader reading a column of "on" switches has no
+              idea which row it is in.
+            #}
+            <label class="mica-switch">
+              <input type="checkbox" data-toggle-task="{{ task.id }}"
+                     {% if task.enabled %}checked{% endif %}
+                     aria-label="{{ 'Pause' if task.enabled else 'Resume' }} {{ task.title }}">
+              <span aria-hidden="true"></span>
+            </label>
+          </td>
           <td class="mica-row-actions">
-            <button type="button" class="mica-btn mica-btn-secondary mica-btn-icon"
-                    data-open-dialog="edit-task-{{ task.id }}"
-                    aria-label="Edit {{ task.title }}">Edit</button>
-            <form action="{{ url_for('main.delete_task') }}" method="POST"
-                  onsubmit="return confirm('Delete {{ task.title|e }}? This cannot be undone.');">
-              <input type="hidden" name="id" value="{{ task.id }}">
-              <button type="submit" class="mica-btn mica-btn-danger mica-btn-icon"
-                      aria-label="Delete {{ task.title }}">Delete</button>
-            </form>
+            <details class="row-menu">
+              <summary class="mica-btn mica-btn-secondary mica-btn-small"
+                       aria-label="Actions for {{ task.title }}">&hellip;</summary>
+              <div class="row-menu-items">
+                <button type="button" data-open-dialog="edit-task-{{ task.id }}">Edit</button>
+                <button type="button" data-print-task="{{ task.id }}"
+                        data-title="{{ task.title|e }}">Print now</button>
+                <button type="button" data-duplicate-task="{{ task.id }}">Duplicate</button>
+                <button type="button" class="is-danger" data-delete-task="{{ task.id }}"
+                        data-title="{{ task.title|e }}">Delete</button>
+              </div>
+            </details>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="5" class="empty-state">No tasks yet. Add one above.</td></tr>
+        <tr><td colspan="6" class="empty-state">No tasks yet. Add one above.</td></tr>
         {% endfor %}
       </tbody>
     </table>

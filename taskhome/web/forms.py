@@ -98,6 +98,37 @@ def task_from_form(form, existing=None):
     return task
 
 
+class JsonForm:
+    """Make a JSON body look like a submitted form (P2-3).
+
+    So the API and the HTML forms share one validator. Two behaviours have to
+    be reconciled:
+
+    * `getlist` -- a form repeats a key, JSON uses a list.
+    * `in` -- an HTML checkbox is *absent* when unchecked, so the form code
+      tests `'enabled' in form`. JSON sends `{"enabled": false}`, where the key
+      is present and the naive test would read it as True. Membership here
+      therefore means "present and truthy", which is identical for a form
+      (a checked box always sends a truthy value) and correct for JSON.
+    """
+
+    def __init__(self, data):
+        self._data = data if isinstance(data, dict) else {}
+
+    def get(self, key, default=None):
+        value = self._data.get(key, default)
+        return value if value is None or isinstance(value, str) else str(value)
+
+    def getlist(self, key):
+        value = self._data.get(key)
+        if value is None:
+            return []
+        return list(value) if isinstance(value, (list, tuple)) else [value]
+
+    def __contains__(self, key):
+        return bool(self._data.get(key))
+
+
 def reject(message, status=400):
     """Render a validation failure. Kept plain until P2-4 brings in toasts."""
     log.info(f"Rejected form submission: {message}")

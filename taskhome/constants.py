@@ -46,6 +46,34 @@ TASKS_FILE = data_path('tasks.json')
 HISTORY_FILE = data_path('history.json')
 LISTENERS_FILE = data_path('listeners.json')  # New file for listener configs
 
+
+def set_data_dir(path):
+    """Repoint the datastore after import (P6-5).
+
+    `--data-dir` cannot work through the environment alone: reaching
+    `taskhome.cli` imports the package, which imports this module and resolves
+    every path, all before the flag has been parsed. Setting TASKHOME_DATA_DIR
+    in main() is therefore too late, and the flag was silently ignored --
+    pointing at a scratch directory while reading the real one, which is the
+    single most dangerous way for this option to fail.
+
+    The store paths are module-level because everything else reads them that
+    way; recomputing them here keeps that, at the cost of this one function
+    being the only thing in the module that mutates.
+    """
+    global DATA_DIR, DATA_DIR_IS_DEFAULT
+    global CONFIG_FILE, TASKS_FILE, HISTORY_FILE, LISTENERS_FILE
+
+    DATA_DIR = os.path.abspath(os.path.expanduser(path))
+    # An explicit path means "the data lives here", never "go and fetch it from
+    # the repo root" -- getting that backwards once relocated a live install.
+    DATA_DIR_IS_DEFAULT = DATA_DIR == DEFAULT_DATA_DIR
+    CONFIG_FILE = data_path('config.json')
+    TASKS_FILE = data_path('tasks.json')
+    HISTORY_FILE = data_path('history.json')
+    LISTENERS_FILE = data_path('listeners.json')
+    return DATA_DIR
+
 # Catch-up policy (P1-10): what happens to occurrences that came due while
 # TaskHome was down. Resolution order is per-task 'catchup', then
 # oneoff_policy for one-offs, then policy. See docs/scheduling.md.
