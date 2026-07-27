@@ -138,6 +138,62 @@ def problems(data):
     return found
 
 
+def print_stats(days=14, history=None):
+    """Prints per day and per kind over the last `days` days (P6-4).
+
+    Derived from history rather than kept as counters. A counter would be a
+    second source of truth that every print path has to remember to increment,
+    and one that silently drifts the first time somebody forgets. History is
+    already the record of paper that exists.
+
+    The consequence, stated rather than hidden: this only sees as far back as
+    `max_history` allows, so a busy install with a small cap has a short
+    window. The counts are honest about what they cover.
+    """
+    from datetime import date, timedelta
+
+    records = state.history if history is None else history
+    today = date.today()
+    window = [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+    by_day = {day.isoformat(): 0 for day in window}
+    by_kind = {}
+    oldest = None
+
+    for record in records:
+        stamp = record.get('print_time')
+        if not stamp:
+            continue
+        try:
+            when = datetime.fromisoformat(stamp).date()
+        except (TypeError, ValueError):
+            continue
+        if oldest is None or when < oldest:
+            oldest = when
+        kind = record.get('type', 'task')
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        key = when.isoformat()
+        if key in by_day:
+            by_day[key] += 1
+
+    series = [by_day[day.isoformat()] for day in window]
+    return {
+        'days': [day.isoformat() for day in window],
+        'series': series,
+        'total_window': sum(series),
+        'total_recorded': len([r for r in records if r.get('print_time')]),
+        'by_kind': dict(sorted(by_kind.items(), key=lambda kv: -kv[1])),
+        'busiest': max(series) if series else 0,
+        'oldest_record': oldest.isoformat() if oldest else None,
+        # History is capped, so "all time" is not all time.
+        'window_limited': len(records) >= state.config.get('max_history', 500),
+    }
+
+
+@bp.route('/api/stats')
+def api_stats():
+    return jsonify({'ok': True, 'data': print_stats()})
+
+
 @bp.route('/api/health')
 def api_health():
     """For uptime monitors. Non-200 means go and look at it."""

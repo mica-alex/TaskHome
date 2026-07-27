@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block title %}Lists{% endblock %}
+{% block content %}
+{#
+  Checklists (P5-2 #11). Printing produces a receipt of [ ] boxes to tick with
+  a pen -- the one thing a phone is worse at than paper.
+#}
+<div class="page-heading">
+  <h1>Lists</h1>
+  <p class="mica-help">
+    Print a checklist to carry. Ticking something off here removes it from the
+    next print; printing never clears the list, because a shopping list is
+    mostly the same things every week.
+  </p>
+</div>
+
+<div class="mica-card">
+  <form class="token-add" id="new-list">
+    <label class="sr-only" for="new-list-name">New list name</label>
+    <input class="mica-input" id="new-list-name" placeholder="New list name&hellip;"
+           maxlength="60">
+    <button type="submit" class="mica-btn">Create</button>
+  </form>
+</div>
+
+<div class="listener-grid" id="lists">
+  {% for entry in lists %}
+  <div class="mica-card list-card" data-list="{{ entry.id }}">
+    <div class="card-heading">
+      <h2 class="mica-card-title">{{ entry.name }}</h2>
+      <span class="mica-chip mica-chip-muted" data-count>
+        {{ entry['items'] | rejectattr('done') | list | length }} left
+      </span>
+    </div>
+
+    <ul class="list-items">
+      {% for item in entry['items'] %}
+      <li class="{{ 'is-done' if item.done }}" data-item="{{ item.id }}">
+        <label class="mica-checkbox">
+          <input type="checkbox" data-toggle-item {% if item.done %}checked{% endif %}
+                 aria-label="{{ item.text }}">
+          <span>{{ item.text }}</span>
+        </label>
+        <button type="button" class="chip-remove" data-remove-item
+                aria-label="Remove {{ item.text }}">&times;</button>
+      </li>
+      {% else %}
+      <li class="empty-state">Nothing on this list yet.</li>
+      {% endfor %}
+    </ul>
+
+    <form class="token-add" data-add-item>
+      <label class="sr-only">Add to {{ entry.name }}</label>
+      {# A textarea, not an input: people arrive with a list already written
+         somewhere else, and adding fifteen things one at a time is the
+         fastest way to make them stop using this. #}
+      <textarea class="mica-input" rows="1" placeholder="Add an item, or paste several lines&hellip;"></textarea>
+      <button type="submit" class="mica-btn mica-btn-secondary">Add</button>
+    </form>
+
+    <div class="studio-actions">
+      <button type="button" class="mica-btn" data-print-list>Print</button>
+      <button type="button" class="mica-btn mica-btn-secondary" data-clear-done>
+        Clear ticked
+      </button>
+      <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+              data-delete-list>Delete list</button>
+    </div>
+  </div>
+  {% else %}
+  <div class="mica-card empty-state">
+    <p>No lists yet.</p>
+    <p class="mica-help">Create one above &mdash; groceries, packing, a weekly routine.</p>
+  </div>
+  {% endfor %}
+</div>
+
+<script src="{{ url_for('static', filename='lists.js') }}"></script>
+{% endblock %}

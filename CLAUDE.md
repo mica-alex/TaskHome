@@ -170,7 +170,13 @@ before fixing bugs or adding features.
 | `taskhome/settings.py`, `logsetup.py` | Port/host resolution; rotating log setup |
 | `taskhome/listeners/base.py` | Plugin interface: `CONFIG_SCHEMA`, `run()`, registry |
 | `taskhome/listeners/scf.py` | SeeClickFix — predates the interface, still bespoke |
-| `taskhome/listeners/nws.py` | NOAA weather alerts — built on `base.Listener` |
+| `taskhome/listeners/nws.py` | NOAA weather alerts |
+| `taskhome/listeners/feeds.py` | RSS/Atom digest |
+| `taskhome/listeners/calendar.py` | ICS agenda (recurrence via `dateutil.rrule`) |
+| `taskhome/listeners/brief.py` | Morning brief — composes the others |
+| `taskhome/listeners/binday.py` | Bin collection reminder |
+| `taskhome/listeners/webhook.py` | Inbound `POST` — the one **push** listener |
+| `taskhome/lists.py` | Checklists: a mini-app, not a listener |
 | `taskhome/web/routes.py` | The `main` blueprint |
 | `taskhome/web/pwa.py` | The `pwa` blueprint: manifest, service worker |
 | `taskhome/web/forms.py`, `pagination.py` | Validation helpers; paging, search, history kinds |

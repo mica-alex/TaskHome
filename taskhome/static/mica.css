@@ -1206,3 +1206,37 @@ main:focus-visible { outline: none; }
 /* A time input sizes itself to its content; left alone it stretches to the
  * full field width and looks like a text box that lost its label. */
 .mica-input-time { width: auto; max-width: 160px; }
+
+/* --- Checklists (P5-2 #11) ----------------------------------------------- */
+
+.list-items { list-style: none; padding: 0; margin: var(--mica-space-3) 0; }
+.list-items li {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--mica-space-2); padding: 6px 0;
+    border-bottom: 1px solid var(--mica-divider);
+}
+.list-items li:last-child { border-bottom: none; }
+.list-items li.is-done span { text-decoration: line-through; opacity: .55; }
+.list-items .mica-checkbox { flex: 1; }
+.list-card .token-add textarea {
+    /* One row until it is needed; a paste of ten lines should still be
+     * visible without scrolling a two-line box. */
+    min-height: var(--mica-control-height); resize: vertical; padding: 8px 12px;
+}
+.badge-list { background: color-mix(in srgb, hsl(150, 60%, 45%) 22%, transparent); }
+.badge-binday { background: color-mix(in srgb, hsl(90, 50%, 45%) 22%, transparent); }
+.badge-calendar { background: color-mix(in srgb, hsl(265, 70%, 60%) 22%, transparent); }
+.badge-brief { background: color-mix(in srgb, hsl(200, 70%, 55%) 22%, transparent); }
+.badge-feeds { background: color-mix(in srgb, hsl(45, 80%, 55%) 22%, transparent); }
+.badge-webhook { background: color-mix(in srgb, hsl(320, 60%, 55%) 22%, transparent); }
+
+/* --- Print sparkline (P6-4) ---------------------------------------------- */
+
+.sparkline {
+    width: 100%; height: 48px; display: block;
+    margin: var(--mica-space-3) 0;
+}
+.sparkline .bar { fill: var(--mica-accent); }
+/* A day with no prints still gets a hairline, so the axis reads as a timeline
+ * rather than stopping where the data does. */
+.sparkline .bar.is-empty { fill: var(--mica-divider); }

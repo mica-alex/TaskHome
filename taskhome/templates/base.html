@@ -138,6 +138,8 @@
                {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>Home</a>
             <a href="{{ url_for('main.task_page') }}"
                {% if request.endpoint == 'main.task_page' %}aria-current="page"{% endif %}>Tasks</a>
+            <a href="{{ url_for('main.checklists') }}"
+               {% if request.endpoint == 'main.checklists' %}aria-current="page"{% endif %}>Lists</a>
             <a href="{{ url_for('main.listener') }}"
                {% if request.endpoint == 'main.listener' %}aria-current="page"{% endif %}>Listeners</a>
             <a href="{{ url_for('main.receipt_studio') }}"

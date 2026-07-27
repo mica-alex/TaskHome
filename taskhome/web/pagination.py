@@ -14,7 +14,7 @@ DEFAULT_PAGE_SIZE = 25
 #: History kinds that are not listeners. Everything else is discovered from
 #: the registry, so a new listener appears in the filter and gets a correctly
 #: labelled badge without either template being touched.
-BUILTIN_KINDS = (('task', 'Tasks'),)
+BUILTIN_KINDS = (('task', 'Tasks'), ('list', 'Checklists'))
 
 
 def history_kinds():

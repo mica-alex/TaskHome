@@ -494,6 +494,15 @@ def api_template_test_print(kind):
 
 # --- print queue (P6-3) -------------------------------------------------------
 
+@bp.route('/lists')
+def checklists():
+    """Checklists (P5-2 #11). A mini-app rather than a listener: nothing polls
+    and nothing fires on a schedule."""
+    from .. import lists
+    return render_template('lists.html', config=state.config,
+                           lists=lists.all_lists())
+
+
 @bp.route('/queue')
 def print_queue():
     jobs = queue.load_queue()

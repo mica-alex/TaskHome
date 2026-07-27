@@ -409,6 +409,80 @@ def rotate_webhook_token():
     return ok({'token': token})
 
 
+# --- checklists (P5-2 #11) ----------------------------------------------------
+
+@bp.route('/lists', methods=['GET'])
+def get_lists():
+    from .. import lists
+    return ok(lists.all_lists())
+
+
+@bp.route('/lists', methods=['POST'])
+def create_list():
+    from .. import lists
+    try:
+        return ok(lists.create_list((body() or {}).get('name')), 201)
+    except ValueError as e:
+        return fail(str(e))
+
+
+@bp.route('/lists/<list_id>', methods=['PATCH', 'DELETE'])
+def modify_list(list_id):
+    from .. import lists
+    try:
+        if request.method == 'DELETE':
+            lists.delete_list(list_id)
+            return ok({'deleted': list_id})
+        return ok(lists.rename_list(list_id, (body() or {}).get('name')))
+    except ValueError as e:
+        return fail(str(e), 404 if 'No such' in str(e) else 400)
+
+
+@bp.route('/lists/<list_id>/items', methods=['POST'])
+def add_list_item(list_id):
+    from .. import lists
+    try:
+        return ok(lists.add_item(list_id, (body() or {}).get('text')), 201)
+    except ValueError as e:
+        return fail(str(e), 404 if 'No such' in str(e) else 400)
+
+
+@bp.route('/lists/<list_id>/items/<item_id>', methods=['PATCH', 'DELETE'])
+def modify_list_item(list_id, item_id):
+    from .. import lists
+    try:
+        if request.method == 'DELETE':
+            lists.remove_item(list_id, item_id)
+            return ok({'deleted': item_id})
+        payload = body() or {}
+        return ok(lists.set_item(list_id, item_id,
+                                 done=payload.get('done'), text=payload.get('text')))
+    except ValueError as e:
+        return fail(str(e), 404 if 'No such' in str(e) else 400)
+
+
+@bp.route('/lists/<list_id>/clear', methods=['POST'])
+def clear_list_done(list_id):
+    from .. import lists
+    try:
+        return ok({'removed': lists.clear_done(list_id)})
+    except ValueError as e:
+        return fail(str(e), 404)
+
+
+@bp.route('/lists/<list_id>/print', methods=['POST'])
+def print_list(list_id):
+    from .. import lists
+    include_done = bool((body() or {}).get('include_done'))
+    try:
+        printed = lists.print_list(list_id, include_done)
+    except ValueError as e:
+        return fail(str(e), 404)
+    if printed:
+        return ok({'printed': True})
+    return fail('Printer not connected -- the list was queued.', 503)
+
+
 @bp.route('/scheduler', methods=['GET'])
 def scheduler_info():
     """What the scheduler is about to do, which is otherwise only visible by

@@ -10,6 +10,7 @@ are two:
 | `feeds` | RSS / Atom digest | poll | `base.Listener` |
 | `calendar` | ICS calendar agenda | poll | `base.Listener` |
 | `brief` | Composes the others | poll | `base.Listener` |
+| `binday` | Bin collection reminder | poll | `base.Listener` |
 | `webhook` | Anything that can POST | **push** | `base.Listener` |
 
 `listeners/base.py` is the plugin interface (`P5-1`). SeeClickFix still runs

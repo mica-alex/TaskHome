@@ -69,4 +69,63 @@
     <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.task_page') }}">Full history</a>
   </div>
 </div>
+
+<div class="mica-card">
+  <div class="card-heading">
+    <h2 class="mica-card-title">Printing</h2>
+    <span class="mica-help" id="stats-window"></span>
+  </div>
+  {#
+    An inline SVG sparkline. No charting library: fourteen numbers do not
+    justify 80 KB of JavaScript on an appliance that must work offline.
+  #}
+  <svg class="sparkline" id="sparkline" viewBox="0 0 280 48" preserveAspectRatio="none"
+       role="img" aria-labelledby="sparkline-label">
+    <title id="sparkline-label">Receipts printed per day over the last two weeks</title>
+  </svg>
+  <div class="status-badges" id="stats-kinds"></div>
+</div>
+
+<script>
+  (function () {
+    'use strict';
+    var svg = document.getElementById('sparkline');
+    if (!svg) return;
+
+    fetch('/api/stats').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) return;
+      var stats = d.data, series = stats.series, max = Math.max(stats.busiest, 1);
+      var w = 280, h = 48, gap = 2;
+      var bw = (w - gap * (series.length - 1)) / series.length;
+
+      series.forEach(function (value, i) {
+        var height = value ? Math.max(2, (value / max) * (h - 4)) : 1;
+        var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', (i * (bw + gap)).toFixed(2));
+        rect.setAttribute('y', (h - height).toFixed(2));
+        rect.setAttribute('width', bw.toFixed(2));
+        rect.setAttribute('height', height.toFixed(2));
+        // A day with no prints still gets a hairline, so the axis reads as a
+        // timeline rather than stopping where the data does.
+        rect.setAttribute('class', value ? 'bar' : 'bar is-empty');
+        var title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = stats.days[i] + ': ' + value + ' receipt(s)';
+        rect.appendChild(title);
+        svg.appendChild(rect);
+      });
+
+      document.getElementById('stats-window').textContent =
+        stats.total_window + ' in 14 days'
+        + (stats.window_limited ? ' (history is capped)' : '');
+
+      var host = document.getElementById('stats-kinds');
+      Object.keys(stats.by_kind).forEach(function (kind) {
+        var chip = document.createElement('span');
+        chip.className = 'mica-chip badge-' + kind;
+        chip.textContent = kind + ': ' + stats.by_kind[kind];
+        host.appendChild(chip);
+      });
+    }).catch(function () { /* the dashboard is still useful without it */ });
+  })();
+</script>
 {% endblock %}
