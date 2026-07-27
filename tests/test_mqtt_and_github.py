@@ -31,8 +31,19 @@ def test_an_absent_dependency_is_reported_not_raised(store, monkeypatch):
     monkeypatch.setattr(mqtt, 'paho', None)
     assert mqtt.listener.ensure_connected() is False
     notice = mqtt.listener.notice()
-    assert 'paho-mqtt' in notice['title']
     assert mqtt.INSTALL_HINT in notice['code']
+
+
+def test_the_notice_names_the_broker_not_just_the_package(store, monkeypatch):
+    """Two things are missing for most people, not one. Saying only "install
+    paho-mqtt" sends someone off to run a pip command and come back to a
+    listener that still cannot do anything, because the library is a client
+    and there is nothing for it to connect to."""
+    monkeypatch.setattr(mqtt, 'paho', None)
+    notice = mqtt.listener.notice()
+    text = f"{notice['title']} {notice['body']}".lower()
+    assert 'broker' in text
+    assert 'webhook' in text, 'no pointer to the option that needs no broker'
 
 
 def test_it_is_registered_as_a_push_listener():

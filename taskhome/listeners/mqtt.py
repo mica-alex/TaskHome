@@ -269,11 +269,20 @@ class MQTTListener(base.Listener):
 
     def notice(self):
         if not available():
+            # Two things are missing for most people, not one. Saying only
+            # "install paho-mqtt" sends someone off to run a pip command and
+            # come back to a listener that still cannot do anything, because
+            # the library is a *client* and there is nothing for it to connect
+            # to. The broker is the real prerequisite.
             return {
-                'title': 'paho-mqtt is not installed',
-                'body': 'This listener needs one extra package. It is optional '
-                        'so that installs which do not use MQTT carry no extra '
-                        'dependency.',
+                'title': 'MQTT needs a broker, and one Python package',
+                'body': 'TaskHome subscribes to a broker -- it does not run '
+                        'one. If you already have Mosquitto (the Home Assistant '
+                        'add-on is the usual case), install the client library '
+                        'below and point this at it. If you do not run a '
+                        'broker, the Webhook listener does the same job with '
+                        'nothing to install: Home Assistant can reach it with '
+                        'a rest_command, and so can curl.',
                 'code': INSTALL_HINT,
             }
         config = self.config()

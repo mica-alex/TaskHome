@@ -386,11 +386,26 @@ data:
     {"title": "Washing machine finished"}
 ```
 
-**The dependency is optional.** `paho-mqtt` is not in `requirements.txt`; the
-module imports without it, reports itself unavailable, and the settings page
-shows the install command. A hard import would take the whole app down for
-everyone who does not use MQTT, since the listener registry is imported at
-startup.
+**TaskHome subscribes; it does not run a broker.** That is the prerequisite
+worth stating first, because it is the one people miss:
+
+```
+  Home Assistant ─publish─┐
+  a script       ─publish─┼─► BROKER (Mosquitto) ─► TaskHome ─► printer
+  a sensor       ─publish─┘      you run this        subscriber
+```
+
+**If you do not already run a broker, use the Webhook listener instead.** It
+produces an identical receipt with nothing to install — Home Assistant reaches
+it with a `rest_command`, and so does `curl`. MQTT earns its keep only when a
+broker is already there, where publishing is one line and several subscribers
+can share the same message.
+
+**The client dependency is optional.** `paho-mqtt` is not in
+`requirements.txt`; the module imports without it, reports itself unavailable,
+and the settings page explains both missing pieces. A hard import would take
+the whole app down for everyone who does not use MQTT, since the listener
+registry is imported at startup.
 
 The connection is long-lived and delivers on paho's own network thread.
 `ensure_connected()` is driven from the scheduler tick rather than at import:
