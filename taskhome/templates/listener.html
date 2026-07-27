@@ -35,6 +35,13 @@
       {% endif %}
     </div>
   </a>
+  {% else %}
+  <div class="mica-card empty-state">
+    <p>No listeners are registered.</p>
+    <p class="mica-help">
+      Listeners are added in code, under <code>taskhome/listeners/</code>.
+    </p>
+  </div>
   {% endfor %}
 </div>
 {% endblock %}

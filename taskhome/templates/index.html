@@ -26,6 +26,7 @@
     <h2 class="mica-card-title">Scheduled Tasks</h2>
     <div class="mica-table-scroll">
       <table class="mica-table">
+      <caption class="sr-only">Scheduled tasks</caption>
         <thead>
           <tr><th>Title</th><th>Next</th><th>Repeats</th><th>Status</th></tr>
         </thead>
@@ -53,6 +54,7 @@
   <h2 class="mica-card-title">Last 5 Prints</h2>
   <div class="mica-table-scroll">
     <table class="mica-table">
+      <caption class="sr-only">Recent print history</caption>
       <thead><tr><th>Type</th><th>Title</th><th>Printed</th></tr></thead>
       <tbody>
         {% for item in history %}

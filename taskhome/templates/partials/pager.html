@@ -34,7 +34,7 @@
             {% elif number == page.page %}
                 <span class="current" aria-current="page">{{ number }}</span>
             {% else %}
-                <a href="{{ history_url(number) }}">{{ number }}</a>
+                <a href="{{ history_url(number) }}" aria-label="Page {{ number }}">{{ number }}</a>
             {% endif %}
         {% endfor %}
 
@@ -52,7 +52,7 @@
             {% if size == page.per_page %}
                 <span class="current">{{ size }}</span>
             {% else %}
-                <a href="{{ history_url(1, size) }}">{{ size }}</a>
+                <a href="{{ history_url(1, size) }}" aria-label="Show {{ size }} per page">{{ size }}</a>
             {% endif %}
         {% endfor %}
     </div>

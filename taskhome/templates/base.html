@@ -123,6 +123,11 @@
       MicaAppBar: 16px radius, 24px blur, 40% background, divider border,
       28px offset, collapsing at the site's 900px breakpoint.
     #}
+    {# First tab stop on every page. Without it a keyboard user tabs through
+       five nav links and three appbar controls before reaching the content,
+       on every single page load. #}
+    <a class="skip-link" href="#main">Skip to content</a>
+
     <header class="mica-appbar">
         <a class="mica-brand" href="{{ url_for('main.index') }}">
             <img src="{{ url_for('static', filename='logo.png') }}" alt="">
@@ -161,7 +166,7 @@
        is normal for this appliance and is shown by the status dot instead. #}
     <div id="status-problems" class="mica-alert mica-alert-error" role="alert" hidden></div>
 
-    <main class="mica-container">
+    <main class="mica-container" id="main" tabindex="-1">
         {% block content %}
         {% endblock %}
     </main>
