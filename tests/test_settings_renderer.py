@@ -143,3 +143,15 @@ def test_malformed_times_are_refused(bad):
     spec = base.field('quiet_hours', 'Quiet hours', 'time_range')
     with pytest.raises(ValueError, match='Quiet hours'):
         base.coerce_field(spec, {'start': bad, 'end': '07:00'})
+
+
+def test_visual_content_stays_inside_the_page_container(client):
+    """base.html renders `scripts` after </main>, so anything visual placed in
+    that block escapes the container and spans the whole viewport. The
+    Diagnostics card did exactly that.
+    """
+    body = client.get('/settings').get_data(as_text=True)
+    after_main = body[body.index('</main>'):]
+    import re
+    stray = re.findall(r'<div class="mica-card"', after_main)
+    assert not stray, 'a card is rendered outside <main> and will span the viewport'

@@ -66,6 +66,21 @@
     </div>
   </div>
 </div>
+<div class="mica-card">
+  <div class="card-heading">
+    <h2 class="mica-card-title">Diagnostics</h2>
+    <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+            id="diag-refresh">Refresh</button>
+  </div>
+  <p class="mica-help">
+    Live from <code>/api/health</code> &mdash; the same thing an uptime monitor
+    or <code>deploy/healthcheck.sh</code> sees.
+  </p>
+  <dl class="status-list" id="diagnostics">
+    <dt>Loading&hellip;</dt><dd></dd>
+  </dl>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -97,20 +112,6 @@
   })();
 </script>
 
-<div class="mica-card">
-  <div class="card-heading">
-    <h2 class="mica-card-title">Diagnostics</h2>
-    <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
-            id="diag-refresh">Refresh</button>
-  </div>
-  <p class="mica-help">
-    Live from <code>/api/health</code> &mdash; the same thing an uptime monitor
-    or <code>deploy/healthcheck.sh</code> sees.
-  </p>
-  <dl class="status-list" id="diagnostics">
-    <dt>Loading&hellip;</dt><dd></dd>
-  </dl>
-</div>
 
 <script>
   (function () {

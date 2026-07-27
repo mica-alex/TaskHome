@@ -127,3 +127,29 @@ def test_status_updates_are_announced(client, path):
     screen reader user gets silence."""
     body = client.get(path).get_data(as_text=True)
     assert 'aria-live' in body or 'role="status"' in body
+
+
+def test_the_skip_link_is_hidden_until_focused():
+    """It is only meant to be reachable by Tab. It appeared as a bare blue
+    link in the corner once, because the browser was serving a cached
+    stylesheet that predated the rule -- so this asserts the rule exists and
+    that focus is what reveals it.
+    """
+    import pathlib
+    css = pathlib.Path('taskhome/static/mica.css').read_text()
+    block = css[css.index('.skip-link {'):]
+    hidden = block[:block.index('}')]
+    assert 'translate' in hidden and '-200%' in hidden, 'not moved off-screen'
+    assert '.skip-link:focus' in css, 'nothing brings it back'
+
+
+@pytest.mark.parametrize('path', PAGES)
+def test_static_urls_are_version_stamped(client, path):
+    """Without this a browser holds a stale stylesheet indefinitely, and the
+    symptom is baffling: new markup, new CSS on disk, half the styling
+    missing."""
+    import re
+    from taskhome import constants
+    body = client.get(path).get_data(as_text=True)
+    for href in re.findall(r'(?:href|src)="(/static/[^"]+)"', body):
+        assert f'v={constants.VERSION}' in href, f'unstamped asset: {href}'

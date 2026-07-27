@@ -48,6 +48,28 @@ def create_app(load=True, with_scheduler=False):
     app.register_blueprint(api.bp)
 
 
+    @app.context_processor
+    def _versioned_static():
+        """Stamp static URLs with the app version.
+
+        Without this a browser can hold a stale mica.css indefinitely, and the
+        symptom is baffling: the markup is new, the CSS on disk is new, and the
+        page renders with half the styling missing. That is exactly how a skip
+        link meant to be invisible until Tab ended up displayed as a bare blue
+        link in the corner.
+
+        Overriding url_for in the template context rather than editing every
+        template means nothing has to remember to do this.
+        """
+        from flask import url_for as flask_url_for
+
+        def url_for(endpoint, **values):
+            if endpoint == 'static' and 'v' not in values:
+                values['v'] = constants.VERSION
+            return flask_url_for(endpoint, **values)
+
+        return {'url_for': url_for}
+
     configure_logging()
     if os.environ.get('TASKHOME_DEV') == '1':
         # Re-read templates on every request so edits show up on refresh.
@@ -58,7 +80,8 @@ def create_app(load=True, with_scheduler=False):
         log.info('Dev mode: templates reload on every request')
     if load:
         storage.load_data()
-        configure_logging()   # re-apply now that config['log_level'] is known
+
+    configure_logging()   # re-apply now that config['log_level'] is known
     if with_scheduler:
         scheduler.start_scheduler()
     return app
