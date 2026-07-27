@@ -11,7 +11,9 @@ are two:
 | `calendar` | ICS calendar agenda | poll | `base.Listener` |
 | `brief` | Composes the others | poll | `base.Listener` |
 | `binday` | Bin collection reminder | poll | `base.Listener` |
+| `github` | Releases, builds, issues, PRs | poll | `base.Listener` |
 | `webhook` | Anything that can POST | **push** | `base.Listener` |
+| `mqtt` | MQTT topics / Home Assistant | **push** | `base.Listener` (optional dep) |
 
 `listeners/base.py` is the plugin interface (`P5-1`). SeeClickFix still runs
 through `poll_scf_listener()` because it was written first; everything new
@@ -336,6 +338,13 @@ That sharing is the point. A push path that printed directly would have to
 reimplement all of it, and would get the queueing wrong — which is the part
 that loses receipts.
 
+**Printing is serialised** by `printing.PRINT_LOCK`. Several threads can print
+— the scheduler, a web request, and a push listener's own network thread — and
+two of them opening the same USB device produces interleaved bytes or a claim
+failure that leaks the interface (`P0-11`). The lock is held for a whole
+receipt, because a receipt is the atomic unit: waiting behind another print is
+fine, sharing paper with it is not.
+
 ### Webhook (`listeners/webhook.py`)
 
 `POST /api/inbound/<token>` with `{"title": "...", "body": "..."}`, or just
@@ -362,6 +371,63 @@ without touching anything else.
   `Retry-After`.
 - Titles and bodies are truncated rather than refused: a 4 MB log would print
   until the roll ran out, but refusing outright loses a legitimate long message.
+
+### MQTT / Home Assistant (`listeners/mqtt.py`)
+
+Subscribe to topics and print what arrives. Any Home Assistant automation can
+print with one action:
+
+```yaml
+service: mqtt.publish
+data:
+  topic: taskhome/print/laundry
+  payload: >-
+    {"title": "Washing machine finished"}
+```
+
+**The dependency is optional.** `paho-mqtt` is not in `requirements.txt`; the
+module imports without it, reports itself unavailable, and the settings page
+shows the install command. A hard import would take the whole app down for
+everyone who does not use MQTT, since the listener registry is imported at
+startup.
+
+The connection is long-lived and delivers on paho's own network thread.
+`ensure_connected()` is driven from the scheduler tick rather than at import:
+it doubles as the reconnect path, and it means a dev server started without a
+scheduler holds no broker connection.
+
+Two behaviours worth knowing:
+
+- **Retained messages are ignored by default.** A retained message is
+  redelivered on every reconnect, so printing them reprints the same receipt
+  each time the connection blips.
+- **An exception never escapes into paho's loop.** One that did would kill the
+  network thread silently, leaving the listener looking connected while
+  receiving nothing at all.
+
+## The GitHub listener (`listeners/github.py`)
+
+Releases, failed workflow runs, issues and pull requests for chosen repos.
+
+**A token is optional.** Public repositories are readable unauthenticated at 60
+requests an hour; a token raises that to 5,000 and allows private repos. That
+tier is usable because of conditional requests — GitHub returns an `ETag` on
+every list endpoint and **a 304 does not count against the rate limit**, so
+polling a handful of repos costs nothing while nothing changes.
+
+Two things found by testing against real repositories rather than reasoning
+about the API:
+
+- **`python/cpython` has zero Release objects.** It publishes tags, and the
+  `releases.atom` feed reflects tags rather than releases. An empty result is
+  correct there, not a bug.
+- **Bot filtering applies only to issues and pull requests.** Every release in
+  `pallets/flask` is published by `github-actions[bot]`; filtering releases by
+  author means the listener silently prints nothing. Dependabot noise on issues
+  is the case the setting is actually for.
+
+Releases also routinely have an empty `name`, so the display falls back to
+`tag_name`.
 
 ## The RSS digest listener (`listeners/feeds.py`)
 

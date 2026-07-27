@@ -9,6 +9,8 @@ base.deliver() from an inbound HTTP request. It shares the whole tail of the
 pipeline -- dedup, caps, filtering, templates, history, queue-on-failure -- so
 a pushed receipt behaves exactly like a polled one.
 """
-from . import base, binday, brief, calendar, feeds, nws, scf, webhook
+from . import (base, binday, brief, calendar, feeds, github, mqtt, nws,
+               scf, webhook)
 
-__all__ = ['base', 'binday', 'brief', 'calendar', 'feeds', 'nws', 'scf', 'webhook']
+__all__ = ['base', 'binday', 'brief', 'calendar', 'feeds', 'github', 'mqtt',
+           'nws', 'scf', 'webhook']

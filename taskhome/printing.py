@@ -8,6 +8,7 @@ test-print routes report the real outcome (P0-10).
 Layouts live in layouts.py as block lists rendered by receipt.py, so the
 preview and the printer share one definition (P3-2).
 """
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -121,6 +122,21 @@ def scf_blocks(issue, category, address, reported_at, status, has_media,
     return styles.fill(template, context)
 
 
+#: One receipt at a time.
+#:
+#: There are now several threads that can print: the scheduler (due tasks and
+#: the queue drain), a web request (test print, reprint, "print now", a list),
+#: and a push listener's own network thread (MQTT delivers on paho's loop
+#: thread). Two of them opening the same USB device at once produces
+#: interleaved bytes -- half of one receipt inside another -- or a claim
+#: failure that leaks the interface (P0-11).
+#:
+#: The lock is held for the whole receipt, not per write, because a receipt is
+#: the atomic unit here. Waiting a few seconds behind another print is fine;
+#: sharing paper with it is not.
+PRINT_LOCK = threading.Lock()
+
+
 def print_blocks(blocks):
     """Put rendered blocks on paper. Returns True only if they came out.
 
@@ -128,17 +144,20 @@ def print_blocks(blocks):
     just the device. The queue drains through this, which is what lets a
     queued job be retried without re-rendering it against settings that may
     have changed since (P6-3).
+
+    Serialised across threads -- see PRINT_LOCK.
     """
-    if not is_printer_connected():
-        return False
-    try:
-        with open_printer() as p:
-            receipt.render_escpos(blocks, p)
-            p.cut()
-        return True
-    except Exception as e:
-        log.error(f"Print error: {e}", exc_info=True)
-        return False
+    with PRINT_LOCK:
+        if not is_printer_connected():
+            return False
+        try:
+            with open_printer() as p:
+                receipt.render_escpos(blocks, p)
+                p.cut()
+            return True
+        except Exception as e:
+            log.error(f"Print error: {e}", exc_info=True)
+            return False
 
 
 def print_task(task):

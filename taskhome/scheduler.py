@@ -118,6 +118,18 @@ def scheduler_loop():
 
             run_due_tasks(now)
 
+            # Push listeners holding a long-lived connection are (re)connected
+            # here rather than at import: this doubles as the reconnect path,
+            # and a dev server started without a scheduler holds no broker
+            # connection.
+            for listener in listener_base.registry().values():
+                if getattr(listener, 'accepts_push', False) and \
+                        hasattr(listener, 'ensure_connected'):
+                    try:
+                        listener.ensure_connected()
+                    except Exception as e:
+                        log.error(f'{listener.title}: connect failed: {e}')
+
             scf.poll_scf_listener(now_utc)
             # Listeners built on the plugin interface (P5-1).
             listener_base.run_all(now_utc)
