@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+{% block title %}Print Queue{% endblock %}
+{% block content %}
+{#
+  The print queue (MASTER_PLAN P6-3).
+
+  Exists so a backlog is a thing you can see and act on. Receipts used to be
+  lost silently when the printer was away; making them durable is only half the
+  fix -- the other half is not hiding them in a JSON file.
+#}
+<div class="mica-card">
+  <div class="mica-card-head">
+    <h1 class="mica-card-title">Print Queue</h1>
+    <div class="studio-actions" style="margin:0">
+      {% if stats.total %}
+        <button type="button" class="mica-btn" id="retry-btn">Retry now</button>
+        <button type="button" class="mica-btn mica-btn-danger" id="clear-btn">Discard all</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not stats.total %}
+    <p class="empty-state">Nothing waiting &mdash; everything has printed.</p>
+  {% else %}
+    <p class="mica-help">
+      <strong>{{ stats.waiting }}</strong> waiting,
+      <strong>{{ stats.parked }}</strong> parked &middot;
+      about <strong>{{ paper_mm }} mm</strong> of paper
+      ({{ (paper_mm / 10) | round(1) }} cm)
+    </p>
+    {% if stats.parked %}
+      <p class="studio-error">
+        {{ stats.parked }} job(s) gave up after repeated failures and will not
+        retry on their own. They are kept, not discarded &mdash; press
+        &ldquo;Retry now&rdquo; once the printer is back.
+      </p>
+    {% endif %}
+
+    <div class="mica-table-scroll">
+      <table class="mica-table">
+        <thead>
+          <tr><th>Receipt</th><th>Queued</th><th>Attempts</th><th>Paper</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr class="{% if job.parked %}task-inactive{% endif %}">
+            <td>
+              {{ job.summary }}
+              {% if job.parked %}
+                <span class="badge-status badge-error">parked</span>
+              {% endif %}
+            </td>
+            <td>{% with value = job.queued_at, aware = true %}
+                  {% include 'partials/timestamp.html' %}{% endwith %}</td>
+            <td>{{ job.attempts }}{% if job.last_error %}
+                  <span class="mica-help">{{ job.last_error }}</span>{% endif %}</td>
+            <td>{{ job.paper_mm }} mm</td>
+            <td>
+              <button type="button" class="mica-btn mica-btn-secondary mica-btn-icon"
+                      data-discard="{{ job.id }}">Discard</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    function post(url, method) {
+      return fetch(url, {method: method || 'POST'}).then(function (r) { return r.json(); });
+    }
+    var retry = document.getElementById('retry-btn');
+    if (retry) retry.addEventListener('click', function () {
+      retry.disabled = true;
+      post('/api/queue/retry').then(function (d) {
+        TaskHome.toast(d.printed + ' printed, ' + d.remaining + ' still waiting',
+                       d.remaining ? 'info' : 'ok');
+        setTimeout(function () { location.reload(); }, 900);
+      }).catch(function () { TaskHome.toast('Could not reach the server', 'error'); })
+        .finally(function () { retry.disabled = false; });
+    });
+
+    var clear = document.getElementById('clear-btn');
+    if (clear) clear.addEventListener('click', function () {
+      if (!confirm('Discard every queued receipt? They will not print.')) return;
+      post('/api/queue/all', 'DELETE').then(function () { location.reload(); });
+    });
+
+    document.querySelectorAll('[data-discard]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        post('/api/queue/' + button.dataset.discard, 'DELETE')
+          .then(function () { location.reload(); });
+      });
+    });
+  })();
+</script>
+{% endblock %}

@@ -24,7 +24,8 @@ from taskhome import printing, state, storage  # noqa: E402
 REAL_STATE_FILES = [REPO_ROOT / name for name in
                     ('config.json', 'tasks.json', 'history.json', 'listeners.json')]
 REAL_DATA_FILES = [REPO_ROOT / 'data' / name for name in
-                   ('config.json', 'tasks.json', 'history.json', 'listeners.json')]
+                   ('config.json', 'tasks.json', 'history.json', 'listeners.json',
+                    'queue.json')]
 
 
 class RealPrinterReached(AssertionError):

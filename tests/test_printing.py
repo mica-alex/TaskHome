@@ -62,10 +62,14 @@ def fake_printer(monkeypatch):
 
 
 @pytest.fixture
-def isolated(monkeypatch):
+def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(taskhome.state, 'history', [])
     monkeypatch.setattr(taskhome.state, 'config', dict(taskhome.constants.DEFAULT_CONFIG))
     monkeypatch.setattr(taskhome.storage, 'save_history', lambda: True)
+    # A failed print now enqueues (P6-3), so the queue file must be redirected
+    # too -- otherwise these tests write to the real data directory, which the
+    # conftest guard correctly refuses.
+    monkeypatch.setattr(taskhome.constants, 'DATA_DIR', str(tmp_path))
 
 
 TASK = {'id': 'abc', 'title': 'Take Medicine', 'recurring': 'daily',

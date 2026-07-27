@@ -102,6 +102,26 @@ def scf_blocks(issue, category, address, reported_at, status, has_media,
     return styles.fill(template, context)
 
 
+def print_blocks(blocks):
+    """Put rendered blocks on paper. Returns True only if they came out.
+
+    The lowest level of the print path: no history, no queueing, no layout --
+    just the device. The queue drains through this, which is what lets a
+    queued job be retried without re-rendering it against settings that may
+    have changed since (P6-3).
+    """
+    if not is_printer_connected():
+        return False
+    try:
+        with open_printer() as p:
+            receipt.render_escpos(blocks, p)
+            p.cut()
+        return True
+    except Exception as e:
+        log.error(f"Print error: {e}", exc_info=True)
+        return False
+
+
 def print_task(task):
     """Print a task receipt. Returns True only if paper actually came out.
 
@@ -113,21 +133,26 @@ def print_task(task):
     for a print that never happened (P0-4), and the test-print routes must not
     claim success when the print failed (P0-10).
     """
-    if not is_printer_connected():
-        log.warning("Printer not connected, skipping print")
-        return False
+    from . import queue
+
     try:
         blocks = task_blocks(task)
-        with open_printer() as p:
-            receipt.render_escpos(blocks, p)
-            p.cut()
-
-        # Only recorded once the receipt is out and the handle is closed.
-        record_history({**task, 'print_time': datetime.now().isoformat(), 'type': 'task'})
-        return True
     except Exception as e:
-        log.error(f"Print error: {e}", exc_info=True)
+        log.error(f"Could not build the task receipt: {e}", exc_info=True)
         return False
+
+    history = {**task, 'print_time': datetime.now().isoformat(), 'type': 'task'}
+
+    if print_blocks(blocks):
+        # Only recorded once the receipt is out and the handle is closed.
+        record_history(history)
+        return True
+
+    # Queued rather than lost. The in-memory retry from P0-4 does not survive a
+    # restart, and for a SeeClickFix issue the window has already moved on.
+    queue.enqueue('task', blocks, description=task.get('title', 'Task'),
+                  history=history)
+    return False
 
 
 def scf_has_video(issue):
@@ -173,12 +198,10 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
 
     The layout lives in layouts.scf_receipt; see print_task for why.
     """
-    if not is_printer_connected():
-        log.warning("Printer not connected, skipping SCF issue print")
-        return False
+    from . import queue
 
-    # Resolve every field BEFORE opening the printer, so a malformed payload
-    # fails without wasting paper on a partial receipt (P0-8).
+    # Resolve every field BEFORE rendering, so a malformed payload fails
+    # without wasting paper on a partial receipt (P0-8).
     category = scf_category(issue)
     address = issue.get('address', 'Unknown Location')
     reported_at = scf_reported_at(issue)
@@ -194,26 +217,32 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
             issue, category=category, address=address, reported_at=reported_at,
             status=status, has_media=has_media, has_video=has_video,
             description=description)
-        with open_printer() as p:
-            receipt.render_escpos(blocks, p)
-            p.cut()
-
-        # Add to state.history
-        record_history({
-            'type': 'scf',
-            'id': issue_id,
-            'category': category,
-            'summary': issue.get('summary', ''),
-            'address': address,
-            'reported_at': issue.get('created_at', ''),
-            'status': status,
-            'description': description,
-            'url': html_url,
-            'has_media': has_media,
-            'has_video': has_video,
-            'print_time': datetime.now().isoformat()
-        })
-        return True
     except Exception as e:
-        log.error(f"SCF issue print error: {e}", exc_info=True)
+        log.error(f"Could not build the SCF receipt: {e}", exc_info=True)
         return False
+
+    history = {
+        'type': 'scf',
+        'id': issue_id,
+        'category': category,
+        'summary': issue.get('summary', ''),
+        'address': address,
+        'reported_at': issue.get('created_at', ''),
+        'status': status,
+        'description': description,
+        'url': html_url,
+        'has_media': has_media,
+        'has_video': has_video,
+        'print_time': datetime.now().isoformat(),
+    }
+
+    if print_blocks(blocks):
+        record_history(history)
+        return True
+
+    # Queued rather than lost (P6-3). This matters more here than for tasks:
+    # a task stays due and retries next tick, but the listener's window has
+    # already moved past this issue.
+    queue.enqueue('scf', blocks, description=f'{category} #{issue_id}',
+                  history=history)
+    return False

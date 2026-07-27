@@ -9,7 +9,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import printing, recurrence, state, storage
+from . import printing, queue, recurrence, state, storage
 from .listeners import scf
 from .logsetup import log
 
@@ -103,6 +103,13 @@ def scheduler_loop():
         try:
             now = datetime.now()
             now_utc = datetime.now(timezone.utc)
+
+            # Drain first: a backlog should clear in order before more is
+            # added to it, or a long outage prints newest-first.
+            printed, waiting = queue.drain(now=now_utc)
+            if printed or waiting:
+                log.info(f"Print queue: {printed} printed, {waiting} waiting")
+
             run_due_tasks(now)
 
             scf.poll_scf_listener(now_utc)

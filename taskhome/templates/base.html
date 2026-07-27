@@ -111,6 +111,10 @@
                {% if request.endpoint == 'main.settings' %}aria-current="page"{% endif %}>Settings</a>
         </nav>
         <div class="mica-appbar-actions">
+            {% if queue_waiting %}
+            <a class="mica-chip mica-chip-accent" href="{{ url_for('main.print_queue') }}"
+               title="Receipts waiting to print">{{ queue_waiting }} queued</a>
+            {% endif %}
             {% if printer_online is defined %}
             <span class="mica-status-dot {{ 'is-online' if printer_online else 'is-offline' }}"
                   title="{{ 'Printer connected' if printer_online else 'Printer not connected' }}">

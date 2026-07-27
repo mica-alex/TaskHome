@@ -9,13 +9,23 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, redirect, render_template, request, url_for
 
-from .. import constants, printing, receipt, state, storage, styles
+from .. import constants, printing, queue, receipt, state, storage, styles
 from ..listeners import scf
 from ..settings import get_port  # module name would clash with the route
 from ..logsetup import log
 from . import forms, pagination
 
 bp = Blueprint('main', __name__)
+
+
+@bp.app_context_processor
+def inject_queue_badge():
+    """Backlog size for the appbar, so a stuck queue is visible everywhere
+    rather than only on its own page."""
+    try:
+        return {'queue_waiting': queue.stats()['total']}
+    except Exception:
+        return {'queue_waiting': 0}
 
 
 @bp.app_context_processor
@@ -368,3 +378,32 @@ def api_template_test_print(kind):
         log.error(f"Template test print failed: {e}", exc_info=True)
         return {'ok': False, 'error': str(e)}, 500
     return {'ok': True}
+
+
+# --- print queue (P6-3) -------------------------------------------------------
+
+@bp.route('/queue')
+def print_queue():
+    jobs = queue.load_queue()
+    return render_template(
+        'queue.html', config=state.config,
+        jobs=[{**job, 'summary': queue.describe(job),
+               'paper_mm': round(receipt.height_mm(job.get('blocks') or []))}
+              for job in jobs],
+        stats=queue.stats(),
+        paper_mm=queue.estimated_paper_mm(jobs))
+
+
+@bp.route('/api/queue/retry', methods=['POST'])
+def api_queue_retry():
+    """Release parked jobs and attempt a drain now."""
+    released = queue.release_parked()
+    printed, remaining = queue.drain()
+    return {'ok': True, 'released': released, 'printed': printed,
+            'remaining': remaining}
+
+
+@bp.route('/api/queue/<job_id>', methods=['DELETE'])
+def api_queue_discard(job_id):
+    removed = queue.discard(None if job_id == 'all' else job_id)
+    return {'ok': True, 'removed': removed}
