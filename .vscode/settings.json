@@ -1,0 +1,33 @@
+{
+  // Point VS Code at the project venv so IntelliSense, linting and the
+  // integrated terminal all use the same interpreter the app runs under.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+
+  // Jinja2 templates are HTML; enable Emmet and correct highlighting.
+  "files.associations": {
+    "templates/*.html": "jinja-html"
+  },
+  "emmet.includeLanguages": {
+    "jinja-html": "html"
+  },
+
+  // Keep the tree focused on source, not build artifacts.
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    ".venv": true
+  },
+  "search.exclude": {
+    "**/__pycache__": true,
+    ".venv": true,
+    "docs/agent-plans": true
+  },
+
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  "[python]": {
+    "editor.rulers": [100]
+  }
+}

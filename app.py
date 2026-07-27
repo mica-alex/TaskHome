@@ -16,7 +16,8 @@ app = Flask(__name__)
 app.logger.setLevel('DEBUG')  # Set to DEBUG for detailed logs
 
 # Constants
-PORT = 5000
+DEFAULT_HOST = '0.0.0.0'
+DEFAULT_PORT = 5000
 VID = 0x04b8
 PID = 0x0e27
 CONFIG_FILE = 'config.json'
@@ -112,6 +113,30 @@ def save_listeners():  # New
         json.dump(listeners, f)
 
 
+def get_host():
+    """Resolve the bind address: TASKHOME_HOST env var > config.json 'host' > default."""
+    return os.environ.get('TASKHOME_HOST') or config.get('host') or DEFAULT_HOST
+
+
+def get_port():
+    """Resolve the listen port: TASKHOME_PORT env var > config.json 'port' > default.
+
+    Port 5000 is claimed by AirPlay Receiver on macOS, so an override is needed
+    there. Falls back to DEFAULT_PORT on anything unparseable rather than
+    refusing to start.
+    """
+    raw = os.environ.get('TASKHOME_PORT') or config.get('port') or DEFAULT_PORT
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        app.logger.warning(f"Invalid port {raw!r}, falling back to {DEFAULT_PORT}")
+        return DEFAULT_PORT
+    if not 1 <= port <= 65535:
+        app.logger.warning(f"Port {port} out of range, falling back to {DEFAULT_PORT}")
+        return DEFAULT_PORT
+    return port
+
+
 def is_printer_connected():
     try:
         dev = usb.core.find(idVendor=VID, idProduct=PID)
@@ -156,7 +181,7 @@ def print_task(task):
         # p.profile.media_width_mm = 80  # Set paper width to 80mm
         # QR code at the top
         p.set(align='center', density=4)
-        qr_url = task.get('url', '') or f"http://{config['hostname']}:{PORT}/task_page#{task['id']}"
+        qr_url = task.get('url', '') or f"http://{config['hostname']}:{get_port()}/task_page#{task['id']}"
         p.qr(qr_url, size=5, model=2)
 
         # Title: bold, large, centered
@@ -420,7 +445,7 @@ def test_print():
             'id': str(uuid.uuid4()),
             'title': 'Test Task Print',
             'extra': 'This is a test print from TaskHome',
-            'url': f"http://{config['hostname']}:{PORT}/task_page#test",
+            'url': f"http://{config['hostname']}:{get_port()}/task_page#test",
             'next_time': datetime.now().isoformat(),
             'recurring': 'none',
             'enabled': True
@@ -540,4 +565,4 @@ app.logger.debug("Initialization complete: Data loaded and scheduler started")
 
 if __name__ == '__main__':
     app.logger.debug("Running directly via python app.py")
-    app.run(host='0.0.0.0', port=PORT)
+    app.run(host=get_host(), port=get_port())

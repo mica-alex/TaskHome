@@ -1,0 +1,53 @@
+{
+  // Debug/run configurations for TaskHome.
+  // Run "Setup Environment" (Terminal > Run Task) first on a fresh clone.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Runs app.py the way production does. Breakpoints work.
+      // Note: justMyCode=false lets you step into escpos/flask internals,
+      // which is useful when debugging receipt output.
+      "name": "TaskHome",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": true,
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        // Default is 5000, but macOS AirPlay Receiver claims it.
+        // Deployed instances leave this unset.
+        "TASKHOME_PORT": "5001"
+      }
+    },
+    {
+      // Same, but steps into third-party code (escpos, flask, requests).
+      "name": "TaskHome (step into libraries)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        // Default is 5000, but macOS AirPlay Receiver claims it.
+        // Deployed instances leave this unset.
+        "TASKHOME_PORT": "5001"
+      }
+    },
+    {
+      // Repairs the virtual environment if needed, then starts the app.
+      // Not a debug session -- no breakpoints. Use when the environment may
+      // be broken and you just want it running.
+      "name": "TaskHome (self-healing, no debugger)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "./scripts/run.sh",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

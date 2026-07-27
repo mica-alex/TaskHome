@@ -1,0 +1,25 @@
+<component name="ProjectRunConfigurationManager">
+  <!--
+    Starts TaskHome through scripts/run.sh, which repairs the virtual
+    environment first if it has broken (deleted interpreter, OS upgrade,
+    moved Homebrew) and only then launches the app.
+
+    Prefer this over the plain "TaskHome" configuration when you are not sure
+    the environment is healthy. Identical behaviour once it is.
+  -->
+  <configuration default="false" name="TaskHome (self-healing)" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="false" />
+    <option name="SCRIPT_PATH" value="$PROJECT_DIR$/scripts/run.sh" />
+    <option name="SCRIPT_OPTIONS" value="" />
+    <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="false" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+    <option name="INTERPRETER_PATH" value="/bin/bash" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="EXECUTE_IN_TERMINAL" value="true" />
+    <option name="EXECUTE_SCRIPT_FILE" value="true" />
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>

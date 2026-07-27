@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Run this first after cloning. Idempotent -- safe to re-run any time.
+      "label": "Setup Environment",
+      "type": "shell",
+      "command": "./scripts/setup-venv.sh",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      // Read-only health report. Exits non-zero if repair is needed.
+      "label": "Environment Check",
+      "type": "shell",
+      "command": "./scripts/setup-venv.sh --check",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      // Discards .venv and rebuilds from scratch against the best available
+      // interpreter. Use when dependencies are in a confusing state.
+      "label": "Rebuild Environment (force)",
+      "type": "shell",
+      "command": "./scripts/setup-venv.sh --force",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Run TaskHome",
+      "type": "shell",
+      "command": "./scripts/run.sh",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        // 5000 is claimed by macOS AirPlay Receiver; deployments use 5000.
+        "env": { "TASKHOME_PORT": "5001" }
+      },
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ]
+}
