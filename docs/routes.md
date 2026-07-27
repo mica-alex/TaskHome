@@ -26,8 +26,19 @@ load), passes `status`, `config`, **all** tasks, and `history[:5]` to
 
 ## `GET /task_page` — `task_page()`
 
-All tasks + the **entire** history list, unpaginated (`tasks.html` renders
-every record; MASTER_PLAN `P2-1` fixes this).
+All tasks, plus **one page** of history. Filtering and paging are server-side,
+so the browser is never handed the whole list.
+
+| Query param | Meaning | Behaviour on bad input |
+| --- | --- | --- |
+| `page` | 1-based page number | Clamped into range — an out-of-range bookmark shows the last page, not a blank table |
+| `per_page` | 25 / 50 / 100 / 250 | Anything else falls back to 25 |
+| `q` | Free text; all terms must match | Searches title, extra, category, address, summary, description, status, id |
+| `type` | `task` or `scf` | Unknown values are ignored rather than matching nothing |
+
+Every pager link carries the current `q` and `type`, so paging never silently
+drops a search, and every view is bookmarkable. The dashboard's five-item list
+at `/` stays deliberately unpaginated.
 
 Both pages render disabled tasks rather than filtering them out, with a status
 badge distinguishing *Missed*, *Error* and *Disabled*. Hiding them previously

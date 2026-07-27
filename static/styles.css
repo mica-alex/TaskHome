@@ -155,3 +155,79 @@ tr.task-inactive td {
     opacity: 0.7;
     font-style: italic;
 }
+
+/* History search + pagination (P2-1). The table used to render every record
+   on every page load; these controls are what replaced that. */
+.history-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.history-filter input[type="search"] {
+    flex: 1 1 240px;
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--input-border, #555);
+    border-radius: 4px;
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    height: auto;
+    box-sizing: border-box;
+}
+
+/* Materialize hides native selects; this one must survive without it. */
+.history-filter select {
+    display: inline-block !important;
+    padding: 6px 10px;
+    border: 1px solid var(--input-border, #555);
+    border-radius: 4px;
+    background-color: var(--input-bg);
+    color: var(--input-text);
+}
+
+.pager {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    font-size: 0.9rem;
+}
+
+.pager-summary { opacity: 0.8; }
+
+.pager-pages a,
+.pager-pages span,
+.pager-size a,
+.pager-size span {
+    display: inline-block;
+    min-width: 2em;
+    padding: 4px 8px;
+    text-align: center;
+    border-radius: 4px;
+}
+
+.pager-pages a:hover,
+.pager-size a:hover { background-color: var(--highlight-bg); }
+
+.pager-pages .current,
+.pager-size .current {
+    background-color: #0288d1;
+    color: #fff;
+    font-weight: 600;
+}
+
+.pager-pages .disabled,
+.pager-pages .ellipsis { opacity: 0.35; }
+
+.badge-task { background-color: #1565c0; color: #fff; }
+.badge-scf  { background-color: #6a1b9a; color: #fff; }
+
+@media (max-width: 600px) {
+    .pager { justify-content: center; }
+    .pager-summary { width: 100%; text-align: center; }
+}

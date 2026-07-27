@@ -1,0 +1,59 @@
+{#
+  Pagination controls for the history table (P2-1).
+
+  Every control is a link carrying the current query and filter, so paging
+  never silently drops the user's search -- and every view is bookmarkable and
+  shareable, which a JS-only pager would not be.
+#}
+{% macro history_url(page_num, per=None) -%}
+{{ url_for('task_page', page=page_num, per_page=per or page.per_page,
+           q=query or None, type=kind or None) }}
+{%- endmacro %}
+
+<div class="pager">
+    <div class="pager-summary">
+        {% if page.total %}
+            Showing {{ page.start }}&ndash;{{ page.end }} of {{ page.total }}
+            {%- if page.total != total_history %} matching (of {{ total_history }}){% endif %}
+        {% else %}
+            No matching records
+        {% endif %}
+    </div>
+
+    {% if page.pages > 1 %}
+    <div class="pager-pages">
+        {% if page.has_prev %}
+            <a href="{{ history_url(page.page - 1) }}" aria-label="Previous page">&laquo;</a>
+        {% else %}
+            <span class="disabled" aria-hidden="true">&laquo;</span>
+        {% endif %}
+
+        {% for number in page_numbers %}
+            {% if number is none %}
+                <span class="ellipsis">&hellip;</span>
+            {% elif number == page.page %}
+                <span class="current" aria-current="page">{{ number }}</span>
+            {% else %}
+                <a href="{{ history_url(number) }}">{{ number }}</a>
+            {% endif %}
+        {% endfor %}
+
+        {% if page.has_next %}
+            <a href="{{ history_url(page.page + 1) }}" aria-label="Next page">&raquo;</a>
+        {% else %}
+            <span class="disabled" aria-hidden="true">&raquo;</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="pager-size">
+        Per page:
+        {% for size in page.page_sizes %}
+            {% if size == page.per_page %}
+                <span class="current">{{ size }}</span>
+            {% else %}
+                <a href="{{ history_url(1, size) }}">{{ size }}</a>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>

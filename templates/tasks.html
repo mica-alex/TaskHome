@@ -44,9 +44,28 @@
     <div class="card">
         <div class="card-content">
             <span class="card-title">Print History</span>
+
+            {# Search and filter submit as GET so every view is bookmarkable. #}
+            <form class="history-filter" method="GET" action="{{ url_for('task_page') }}">
+                <input type="search" name="q" value="{{ query }}"
+                       placeholder="Search title, address, description&hellip;"
+                       aria-label="Search history">
+                <select name="type" aria-label="Filter by type">
+                    <option value="" {% if not kind %}selected{% endif %}>All types</option>
+                    <option value="task" {% if kind == 'task' %}selected{% endif %}>Tasks</option>
+                    <option value="scf" {% if kind == 'scf' %}selected{% endif %}>SeeClickFix</option>
+                </select>
+                <input type="hidden" name="per_page" value="{{ page.per_page }}">
+                <button type="submit" class="btn-small">Search</button>
+                {% if query or kind %}
+                    <a class="btn-flat btn-small" href="{{ url_for('task_page') }}">Clear</a>
+                {% endif %}
+            </form>
+
             <table class="striped">
                 <thead>
                     <tr>
+                        <th>Type</th>
                         <th>Title</th>
                         <th>Print Time</th>
                     </tr>
@@ -54,16 +73,33 @@
                 <tbody>
                     {% for item in history %}
                     <tr>
+                        <td>
+                            <span class="badge-status {{ 'badge-scf' if item.type == 'scf' else 'badge-task' }}">
+                                {{ 'SCF' if item.type == 'scf' else 'Task' }}
+                            </span>
+                        </td>
                         {% if item.type == 'scf' %}
-                            <td>SCF: {{ item.category }} {% if item.summary %} - {{ item.id }}{% endif %}</td>
+                            <td>{{ item.category }}{% if item.address %} &mdash; {{ item.address }}{% endif %}</td>
                         {% else %}
                             <td>{{ item.title }}</td>
                         {% endif %}
                         <td>{{ item.print_time }}</td>
                     </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="3" class="empty-state">
+                            {% if query or kind %}
+                                No history matches that search.
+                            {% else %}
+                                Nothing has printed yet.
+                            {% endif %}
+                        </td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
+
+            {% include 'partials/pager.html' %}
         </div>
     </div>
 
