@@ -219,3 +219,40 @@ def test_mobile_cards_cannot_overflow_their_container():
     rule = rule[:rule.index('}')]
     assert 'width: 100%' in rule
     assert 'box-sizing: border-box' in rule, 'width:100% without border-box'
+
+
+def test_the_receipt_preview_scrolls_inside_its_own_box():
+    """The receipt body is a fixed 64 characters wide because that IS the
+    paper; reflowing it would make the preview a lie. It therefore has to
+    scroll inside its own container rather than widening the page, which is
+    what pushed the whole Receipts page into a horizontal scroll on a phone.
+    """
+    import pathlib
+    css = pathlib.Path('taskhome/static/mica.css').read_text()
+    markup = pathlib.Path('taskhome/templates/receipt_studio.html').read_text()
+    assert 'receipt-paper-scroll' in markup, 'the paper is not wrapped'
+    rule = css[css.index('.receipt-paper-scroll {'):]
+    rule = rule[:rule.index('}')]
+    assert 'overflow-x: auto' in rule and 'max-width: 100%' in rule
+
+
+def test_mobile_css_targets_classes_that_exist():
+    """A rule naming a class no template uses is dead code that looks like a
+    fix -- .receipt-preview was styled for mobile and never existed.
+    """
+    import pathlib
+    import re
+    css = pathlib.Path('taskhome/static/mica.css').read_text()
+    mobile = css[css.index('@media (max-width: 600px)'):]
+    mobile = mobile[:mobile.index('\n}\n')]
+
+    markup = ''
+    for path in pathlib.Path('taskhome/templates').rglob('*.html'):
+        markup += path.read_text()
+    markup += pathlib.Path('taskhome/static/mica.css').read_text()
+
+    # Only check the app's own component classes.
+    for selector in set(re.findall(r'\.(mica-[\w-]+|studio-[\w-]+|r-[\w-]+|'
+                                   r'receipt-[\w-]+|row-[\w-]+|listener-[\w-]+)',
+                                   mobile)):
+        assert selector in markup, f'mobile CSS styles .{selector}, which nothing uses'

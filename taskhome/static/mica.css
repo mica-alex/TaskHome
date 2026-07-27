@@ -368,6 +368,18 @@ textarea.mica-input,
   box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.06);
 }
 
+.receipt-paper-scroll {
+  /*
+   * The receipt body is a fixed 64 characters wide because that IS the paper --
+   * reflowing it would make the preview a lie. So it scrolls inside its own
+   * container rather than widening the page, which is what pushed the whole
+   * Receipts page into a horizontal scroll on a phone.
+   */
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .receipt-body {
   font-family: var(--mica-font-mono);
   font-size: var(--rp-base);
@@ -555,8 +567,11 @@ header.mica-appbar .mica-brand img { height: 26px; }
 .mica-facts dt { color: var(--mica-text-muted); font-size: var(--mica-text-small); }
 .mica-facts dd { margin: 0; }
 
-.mica-row-actions { display: flex; gap: 6px; align-items: center; }
-.mica-row-actions form { margin: 0; }
+/* One class for a row's action cell. There were briefly two names for this --
+ * .mica-row-actions and .row-actions -- and the mobile rule only knew one, so
+ * the task rows' menu button was never right-aligned on a phone. */
+.row-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.row-actions form { margin: 0; }
 
 .mica-btn-icon { padding: 4px 10px; min-height: 32px; font-size: var(--mica-text-small); }
 
@@ -892,7 +907,7 @@ body.is-disconnected .mica-appbar-actions { opacity: .45; }
 body.is-disconnected .mica-status-dot::after { content: ' (offline)'; }
 
 /* Row actions sit right-aligned and stay out of the way until the row matters. */
-.row-actions { text-align: right; white-space: nowrap; }
+.row-actions { white-space: nowrap; }
 .mica-table tbody tr:not(:hover) .row-actions .mica-btn { opacity: .55; }
 .mica-table tbody tr:hover .row-actions .mica-btn { opacity: 1; }
 /* Keyboard users never hover, so focus has to reveal it too. */
@@ -1127,7 +1142,29 @@ main:focus-visible { outline: none; }
         padding-bottom: var(--mica-space-2);
     }
 
-    .mica-table td.row-actions { justify-content: flex-end; }
+    .mica-table td.row-actions {
+        justify-content: flex-end;
+        /* Not the row's heading cell, so it must not pick up the full-width
+         * left-aligned treatment that unlabelled cells get. */
+        text-align: right;
+        font-weight: 400;
+        padding-top: var(--mica-space-2);
+    }
+
+    /*
+     * The menu is anchored `right: 0` to its button, so it grows leftwards.
+     * On a phone the button sits near the left edge of a card, which put the
+     * whole menu off the side of the screen -- visible only as two clipped
+     * letters. Spanning the card is both unclippable and an easier target.
+     */
+    .row-menu { width: 100%; }
+    .row-menu summary { display: inline-block; }
+    .row-menu-items {
+        left: 0;
+        right: 0;
+        min-width: 0;
+    }
+    .row-menu-items button { padding: 12px; }
     .mica-table caption { display: block; }
 
     /* An empty state should not look like a card with one blank field. */
@@ -1135,9 +1172,16 @@ main:focus-visible { outline: none; }
         display: block; text-align: center; font-weight: 400;
     }
 
-    /* The receipt preview is a fixed-width artefact; shrink rather than
-     * reflow, or the 64-column grid stops meaning anything. */
-    .receipt-preview { font-size: 10px; }
+    /* Shrink the paper rather than reflow it, so 64 columns still fits on a
+     * phone without scrolling. It stays scrollable either way. */
+    :root { --rp-base: 8px; }
+
+    /* A grid child with content wider than its track will not shrink below
+     * that content unless told it may. */
+    .studio-block-fields > *, .studio-field { min-width: 0; }
+    .studio-field input, .studio-field select, .studio-field textarea {
+        max-width: 100%;
+    }
 
     .mica-grid-2 { grid-template-columns: 1fr; }
     .listener-grid { grid-template-columns: 1fr; }
