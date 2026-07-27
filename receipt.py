@@ -70,9 +70,22 @@ PAGE_COLUMNS = FONTS['b']['cols']
 # Plain dicts rather than classes: these are meant to be JSON-serialisable, so
 # P3-1's user-editable templates can express exactly the same thing.
 
-def text(value, font='b', width=1, height=1, bold=False, align='center'):
-    return {'type': 'text', 'value': value, 'font': font, 'width': width,
-            'height': height, 'bold': bold, 'align': align}
+def text(value, font='b', width=1, height=1, bold=False, align='center',
+         density=None, leading=None):
+    """A run of text.
+
+    density (0-8) and leading (dots) are optional overrides; None means "leave
+    the printer's current setting alone", which is what the approved default
+    layouts rely on. They exist so P3-1's editable templates can express them
+    without the renderer needing to change.
+    """
+    block = {'type': 'text', 'value': value, 'font': font, 'width': width,
+             'height': height, 'bold': bold, 'align': align}
+    if density is not None:
+        block['density'] = density
+    if leading is not None:
+        block['leading'] = leading
+    return block
 
 
 def qr(value, size=4):
@@ -261,7 +274,8 @@ def render_escpos(blocks, printer):
                             bold=block.get('bold', False),
                             custom_size=True,
                             width=max(int(block.get('width', 1)), 1),
-                            height=max(int(block.get('height', 1)), 1))
+                            height=max(int(block.get('height', 1)), 1),
+                            density=block.get('density'))
                 # Wrap here rather than letting the printer do it. The printer
                 # hard-wraps at the column limit, splitting words mid-way
                 # ("...5 cars g" / "o by at a time"), while the preview wraps

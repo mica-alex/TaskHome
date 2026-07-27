@@ -17,6 +17,9 @@ from escpos.printer import Usb
 from flask import Flask, render_template, request, redirect, url_for
 import requests  # New import for API calls
 
+import layouts   # receipt layouts as data (P3-1)
+import receipt   # shared renderer: preview and printer (P3-2)
+
 app = Flask(__name__)
 
 # Constants
@@ -735,8 +738,18 @@ def record_history(record):
     save_history()
 
 
+def task_qr_url(task):
+    """QR target for a task: its own url if set, else a deep link to the app."""
+    hostname = config.get('hostname', DEFAULT_CONFIG['hostname'])
+    return task.get('url', '') or f"http://{hostname}:{get_port()}/task_page#{task['id']}"
+
+
 def print_task(task):
     """Print a task receipt. Returns True only if paper actually came out.
+
+    The layout lives in layouts.task_receipt as a list of blocks, rendered by
+    receipt.render_escpos -- the same definition the preview uses, so what is
+    previewed is what prints (P3-2).
 
     The return value matters: the scheduler must not advance a task's schedule
     for a print that never happened (P0-4), and the test-print routes must not
@@ -746,46 +759,9 @@ def print_task(task):
         app.logger.warning("Printer not connected, skipping print")
         return False
     try:
+        blocks = layouts.task_receipt(task, task_qr_url(task))
         with open_printer() as p:
-            # p.profile.media_width_mm = 80  # Set paper width to 80mm
-            # QR code at the top
-            p.set(align='center', density=4)
-            hostname = config.get('hostname', DEFAULT_CONFIG['hostname'])
-            qr_url = task.get('url', '') or f"http://{hostname}:{get_port()}/task_page#{task['id']}"
-            p.qr(qr_url, size=5, model=2)
-
-            # Title: bold, large, centered
-            p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
-            p.text(task['title'] + '\n')
-
-            # Extra info: regular, left-aligned
-            if 'extra' in task and task['extra']:
-                # Blank line
-                p.text('\n')
-                p.set(align='center', font='b', bold=False, custom_size=True, width=2, height=2)
-                p.text(task['extra'] + '\n')
-
-            # Blank line
-            p.text('\n')
-
-            # Timestamp: italic, left-aligned
-            print_time = datetime.now().strftime('%I:%M %p, %m/%d/%Y')
-            p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
-            p.text(f'Printed at {print_time}\n')
-
-            # Blank line
-            p.text('\n')
-
-            # Task Type: italic, left-aligned
-            recurring = task.get('recurring', 'none')
-            task_type = 'Non-recurring' if recurring == 'none' else f"Recurring ({recurring.capitalize()})"
-            p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
-            p.text(f'Task Type: {task_type}\n')
-
-            # Task ID: italic, left-aligned
-            p.text(f'Task ID: {task["id"]}\n')
-
-            # Disable italics and cut
+            receipt.render_escpos(blocks, p)
             p.cut()
 
         # Only recorded once the receipt is out and the handle is closed.
@@ -835,7 +811,10 @@ def scf_reported_at(issue):
 
 
 def print_scf_issue(issue):  # New: Custom print for SCF issues
-    """Print an SCF issue receipt. Returns True only if it actually printed."""
+    """Print an SCF issue receipt. Returns True only if it actually printed.
+
+    The layout lives in layouts.scf_receipt; see print_task for why.
+    """
     if not is_printer_connected():
         app.logger.warning("Printer not connected, skipping SCF issue print")
         return False
@@ -846,52 +825,19 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
     address = issue.get('address', 'Unknown Location')
     reported_at = scf_reported_at(issue)
     status = issue.get('status', 'Unknown')
-    has_media = 'Yes' if scf_has_media(issue) else 'No'
+    has_media = scf_has_media(issue)
+    has_video = scf_has_video(issue)
     html_url = issue.get('html_url', '')
     issue_id = issue.get('id', 'unknown')
     description = issue.get('description') or ''
 
     try:
+        blocks = layouts.scf_receipt(
+            issue, category=category, address=address, reported_at=reported_at,
+            status=status, has_media=has_media, description=description,
+            has_video=has_video)
         with open_printer() as p:
-            # QR code at the top (to issue HTML URL)
-            if html_url:
-                p.set(align='center', density=4)
-                p.qr(html_url, size=5, model=2)
-
-            # Category: bold, large, centered (like title)
-            p.set(align='center', font='a', bold=True, custom_size=True, width=3, height=3, density=4)
-            p.text(category + '\n')
-
-            # Blank line
-            p.text('\n')
-
-            # Location, reported timestamp, status (smaller text)
-            p.set(align='center', font='b', bold=False, custom_size=True, width=1, height=1)
-            p.text(f'Location: {address}\n')
-            p.text(f'Reported: {reported_at}\n')
-            p.text(f'Status: {status}\n')
-            p.text(f'Has Media: {has_media}\n')
-
-            # Description (if present)
-            if description:
-                p.text('\nDescription:\n')
-                p.text(description + '\n')
-
-            # Blank line
-            p.text('\n')
-
-            # Print timestamp
-            print_time = datetime.now().strftime('%I:%M %p, %m/%d/%Y')
-            p.text(f'Printed at {print_time}\n')
-
-            # Issue ID
-            try:
-                p.barcode(str(issue_id), 'CODE39', width=2, height=60, pos='below', align_ct=True)
-            except Exception as e:
-                p.text(f'Issue ID: {issue_id}\n')
-                app.logger.error(f"Barcode print error: {e}")
-
-            # Cut
+            receipt.render_escpos(blocks, p)
             p.cut()
 
         # Add to history
@@ -905,6 +851,8 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
             'status': status,
             'description': description,
             'url': html_url,
+            'has_media': has_media,
+            'has_video': has_video,
             'print_time': datetime.now().isoformat()
         })
         return True

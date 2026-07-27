@@ -377,3 +377,23 @@ def test_printed_is_capitalised_on_both_receipts():
 def test_video_only_issue_is_labelled():
     blocks = layouts.scf_receipt(ISSUE, **dict(SCF, has_media=False), has_video=True)
     assert 'Video' in '\n'.join(r.render_text(blocks))
+
+
+def test_density_is_omitted_unless_asked_for():
+    """None means 'leave the printer alone'. The approved layouts set no
+    density; the previous code forced 4 on the QR and title."""
+    assert 'density' not in r.text('x')
+    p = RecordingPrinter()
+    r.render_escpos([r.text('x')], p)
+    sets = [c[1] for c in p.calls if c[0] == 'set']
+    assert sets and sets[0].get('density') is None
+
+
+def test_density_passes_through_when_set():
+    p = RecordingPrinter()
+    r.render_escpos([r.text('x', density=6)], p)
+    assert any(c[1].get('density') == 6 for c in p.calls if c[0] == 'set')
+
+
+def test_per_block_leading_override():
+    assert r.line_dots(r.text('x', font='a', height=3, leading=30)) == 24 * 3 + 30

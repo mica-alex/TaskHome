@@ -24,6 +24,11 @@ class FakeEscpos:
     def set(self, *a, **k):
         self._record('set')
 
+    def line_spacing(self, spacing=None, divisor=180):
+        # The renderer sets spacing per block; without this the fake diverges
+        # from the real escpos surface and every print appears to fail.
+        self._record('line_spacing')
+
     def text(self, *a, **k):
         self._record('text')
 
@@ -195,3 +200,67 @@ def test_bad_payload_fails_before_opening_the_printer(isolated, fake_printer):
     device = fake_printer()
     taskhome.print_scf_issue({'id': 2, 'media': object()})
     assert 'cut' in device.calls  # completed rather than dying midway
+
+
+# --- the shared renderer is actually what prints -------------------------------
+
+def test_print_task_uses_the_shared_layout(isolated, fake_printer, monkeypatch):
+    """print_task must render layouts.task_receipt, not its own hand-rolled
+    sequence -- otherwise the preview describes something that never prints."""
+    seen = {}
+
+    def spy(task, qr_url, when=None):
+        seen['task'] = task
+        seen['url'] = qr_url
+        return [taskhome.receipt.text('SPY')]
+
+    monkeypatch.setattr(taskhome.layouts, 'task_receipt', spy)
+    device = fake_printer()
+
+    assert taskhome.print_task(dict(TASK)) is True
+    assert seen['task']['id'] == 'abc'
+    assert 'task_page#abc' in seen['url']
+    assert 'cut' in device.calls
+
+
+def test_print_scf_uses_the_shared_layout(isolated, fake_printer, monkeypatch):
+    seen = {}
+
+    def spy(issue, **kwargs):
+        seen.update(kwargs)
+        return [taskhome.receipt.text('SPY')]
+
+    monkeypatch.setattr(taskhome.layouts, 'scf_receipt', spy)
+    fake_printer()
+
+    issue = dict(BASE_ISSUE, media={'image_full': 'x', 'video_url': 'v'},
+                 description='Broken')
+    assert taskhome.print_scf_issue(issue) is True
+    assert seen['category'] == 'Pothole'
+    assert seen['has_media'] is True
+    assert seen['has_video'] is True          # video_url was previously ignored
+
+
+def test_no_barcode_on_the_new_scf_layout(isolated, fake_printer):
+    """The CODE39 barcode was removed; its ~10mm bought nothing the QR and the
+    printed id did not already carry."""
+    device = fake_printer()
+    taskhome.print_scf_issue(dict(BASE_ISSUE))
+    assert 'barcode' not in device.calls
+
+
+def test_video_only_issue_is_recorded_as_having_media(isolated, fake_printer):
+    fake_printer()
+    issue = dict(BASE_ISSUE, media={'image_full': None, 'video_url': 'https://v'})
+    taskhome.print_scf_issue(issue)
+    assert taskhome.history[0]['has_video'] is True
+    assert taskhome.history[0]['has_media'] is False
+
+
+def test_task_qr_url_prefers_an_explicit_url(isolated):
+    assert taskhome.task_qr_url({'id': 'x', 'url': 'https://custom'}) == 'https://custom'
+
+
+def test_task_qr_url_falls_back_to_the_app(isolated):
+    taskhome.config['hostname'] = 'printer.local'
+    assert 'printer.local' in taskhome.task_qr_url({'id': 'x'})

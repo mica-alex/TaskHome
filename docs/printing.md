@@ -79,66 +79,62 @@ Note: `p.set()` is stateful — settings persist until the next `p.set()`. The
 comments in `app.py` saying "italic" are aspirational; no italics are ever set
 (ESC/POS has no italic in this profile).
 
-## Task receipt layout (`print_task`, `app.py:175-227`)
+## Receipt layouts
 
-```
-        [ QR code ]              <- size 5, model 2; URL = task.url if set,
-                                    else http://<hostname>:5000/task_page#<id>
-        TITLE                    <- font a, bold, 3x3, density 4, centered
-                                 <- blank line (only if extra present)
-        Extra text               <- font b, 2x2, centered (only if task.extra)
-                                 <- blank line
-        Printed at 09:36 PM, 08/26/2025   <- font b, 1x1
-                                 <- blank line
-        Task Type: Recurring (Daily)      <- font b, 1x1
-        Task ID: 6ef1b365-...             <- same style
-        [ cut ]
-```
+Layouts are **data**, not code: `layouts.py` returns a list of blocks, and
+`receipt.py` renders that list either to the printer (`render_escpos`) or to
+text (`render_text`). One definition drives both, so a preview cannot describe
+something different from what prints — the property MASTER_PLAN `P3-4`'s live
+preview depends on.
 
-- Task type string: `Non-recurring` for `none`, else
-  `Recurring (<Mode capitalized>)` — note `every_weekday` renders as
-  `Recurring (Every_weekday)` (cosmetic, MASTER_PLAN `P2-10`).
-- On success: record appended to history (front), truncated to `max_history`,
-  `save_history()`.
-
-## SCF issue receipt layout (`print_scf_issue`, `app.py:230-300`)
-
-```
-        [ QR code ]              <- issue.html_url, size 5, model 2
-        CATEGORY                 <- request_type.title or "Unknown Category";
-                                    font a, bold, 3x3, density 4
-                                 <- blank line
-        Location: 123 Main St    <- font b, 1x1 (this style through the end)
-        Reported: 06:53 PM, 07/23/2026
-        Status: Open
-        Has Media: Yes|No
-        Description:             <- only if description present and truthy
-        <description text>
-                                 <- blank line
-        Printed at 09:36 AM, 08/26/2025
-        [ CODE39 barcode of issue id, pos below ]   <- falls back to
-                                                       "Issue ID: NNN" text on error
-        [ cut ]
+```python
+import layouts, receipt
+blocks = layouts.task_receipt(task, qr_url)
+print(receipt.preview(blocks))          # ASCII, with a height in mm
+receipt.render_escpos(blocks, printer)  # the same blocks, on paper
 ```
 
-Payload handling:
+Block types: `text` (font, width/height multipliers, bold, align, optional
+density and leading), `qr`, `barcode`, `rule`, `blank`, `gap` (sub-line space).
 
-- **Every field is resolved before the printer is opened.** `html_url`,
-  `media.image_full`, `request_type.title` and `created_at` were previously
-  indexed inline, so an unexpected shape raised *after* the QR and title were
-  already on paper — an uncut partial receipt, no history record, and (before
-  `P0-7`) a watermark that advanced anyway so the issue was never retried.
-  Resolving first means a malformed payload fails having printed nothing.
-  Helpers: `scf_category()`, `scf_has_media()`, `scf_reported_at()`.
-- Tolerated shapes: `media` absent, null, or not a dict; `request_type` absent,
-  null, or missing `title` (→ `"Unknown Category"`); `created_at` absent or
-  unparseable (→ the raw value, or `"Unknown"`); `html_url` absent (the QR is
-  simply omitted).
-- `reported_at` is formatted in **the issue's own offset**, not local time. The
-  live API returns the place's local offset, so this reads correctly for nearby
-  places.
-- The history record is a projection, not the raw issue — see
-  [data-model.md](data-model.md#type-scf--a-printed-seeclickfix-issue).
+### Current defaults
+
+```
+task reminder                       SCF issue
+  [QR, size 4]                        [QR, size 4]
+  Title      font a, 2x, bold         Category   font a, 2x, bold
+  (6-dot gap)                         (6-dot gap)
+  Extra      font a, 1x               Address    font b
+  Daily - Printed <time> - <id8>      Status - Reported - Photo
+                                      ----
+                                      Description   font b, left
+                                      ----
+                                      #id - Printed <time>
+```
+
+Roughly 40% shorter than the originals with no field removed. The reasoning
+for each choice is in `layouts.py`; the previous designs are kept as
+`legacy_*` so any change can be justified by a measured height difference.
+
+### Line spacing — the part that is not obvious
+
+`render_escpos` sets line spacing per block rather than using the printer
+default, for two reasons found on paper:
+
+- The default feed (~34 dots) is **shorter than a double-height font a cell**
+  (48 dots), so a 2x title had the next line printed into its descenders.
+- The printer **floors line spacing at the character height and silently
+  clamps anything smaller**. Six different leading values printed identically
+  until one exceeded that floor. `MIN_LINE_DOTS` exists for exactly this:
+  below it, requests have no effect at all.
+
+Also note `ESC 3 n` sets *n × the vertical motion unit*, which is 1/203 inch
+here — so one unit is one dot, despite python-escpos naming the parameter
+`divisor=180`.
+
+Text is wrapped by `receipt.wrap()` before being sent. Letting the printer wrap
+splits words mid-way (`"...5 cars g"` / `"o by at a time"`) because it
+hard-wraps at the column limit, which made the preview disagree with the paper.
 
 ## Test prints
 
