@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% from 'partials/setting_field.html' import field %}
+{% block title %}{{ listener.title }}{% endblock %}
+{% block content %}
+{#
+  Every registered listener's settings page, rendered entirely from its
+  CONFIG_SCHEMA (P2-11). There is no per-listener markup here and there must
+  not be: the whole point is that P5-3's twenty-odd settings and whatever the
+  next listener needs both arrive for free.
+#}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <a href="{{ url_for('main.listener') }}">Listeners</a>
+  <span aria-hidden="true">/</span>
+  <span aria-current="page">{{ listener.title }}</span>
+</nav>
+
+<div class="mica-card">
+  <div class="card-heading">
+    <h1 class="mica-card-title">{{ listener.title }}</h1>
+    <span class="mica-status-dot {{ 'is-online' if listener.enabled() else 'is-offline' }}">
+      {{ 'Running' if listener.enabled() else 'Off' }}
+    </span>
+  </div>
+  {% if listener.description %}<p class="mica-help">{{ listener.description }}</p>{% endif %}
+
+  {% if error %}<div class="mica-alert mica-alert-error">{{ error }}</div>{% endif %}
+
+  <form method="POST" action="{{ url_for('main.listener_settings', name=listener.name) }}">
+    {% for heading, specs in listener.groups() %}
+      {% if heading %}<h2 class="settings-group">{{ heading }}</h2>{% endif %}
+      {% for spec in specs %}
+        {{ field(spec, config.get(spec.key), listener=listener, config=config) }}
+      {% endfor %}
+    {% endfor %}
+
+    <div class="studio-actions">
+      <button type="submit" class="mica-btn">Save</button>
+      <a class="mica-btn mica-btn-secondary" href="{{ url_for('main.listener') }}">Back</a>
+    </div>
+  </form>
+</div>
+
+{% if runtime %}
+<div class="mica-card">
+  <h2 class="mica-card-title">Status</h2>
+  <dl class="status-list">
+    <dt>Last checked</dt>
+    <dd>{% if runtime.last_check %}{% include 'partials/timestamp.html' with context %}{{ runtime.last_check }}{% else %}Never{% endif %}</dd>
+    <dt>Seen</dt><dd>{{ (runtime.seen or []) | length }} item(s) remembered for de-duplication</dd>
+    {% if runtime.last_error %}
+      <dt>Last error</dt><dd class="is-error">{{ runtime.last_error }}</dd>
+      <dt>Retrying after</dt><dd>{{ runtime.backoff_until or 'next tick' }}</dd>
+    {% endif %}
+  </dl>
+</div>
+{% endif %}
+
+<script src="{{ url_for('static', filename='settings.js') }}"></script>
+{% endblock %}

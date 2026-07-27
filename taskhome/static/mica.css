@@ -732,3 +732,74 @@ tr.task-inactive td { opacity: 0.6; }
   .pager { justify-content: center; }
   .pager-summary { width: 100%; text-align: center; }
 }
+
+/* --- Schema-driven settings (P2-11) ------------------------------------- */
+
+/*
+ * A settings page built from a schema has no hand-placed spacing, so the
+ * grouping has to come from the type system: a group heading is the only
+ * divider, and it earns its weight by being the sole one.
+ */
+.settings-group {
+    font-size: var(--mica-text-h6);
+    font-weight: 600;
+    margin: var(--mica-space-6) 0 var(--mica-space-3);
+    padding-top: var(--mica-space-4);
+    border-top: 1px solid var(--mica-divider);
+    color: var(--mica-text-primary);
+}
+.settings-group:first-of-type { border-top: none; padding-top: 0; margin-top: var(--mica-space-2); }
+
+.breadcrumbs {
+    display: flex; gap: var(--mica-space-2); align-items: center;
+    font-size: var(--mica-text-caption); color: var(--mica-text-secondary);
+    margin-bottom: var(--mica-space-3);
+}
+.breadcrumbs a { color: var(--mica-accent); text-decoration: none; }
+.breadcrumbs a:hover { text-decoration: underline; }
+
+.card-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--mica-space-3); }
+
+/* Token chips over a hidden comma field: a ZIP list is easier to correct when
+ * each entry is a thing you can delete. */
+.token-add { display: flex; gap: var(--mica-space-2); align-items: center; }
+.token-add .mica-input { flex: 1; }
+.token-chips:empty { display: none; }
+
+.time-range { display: flex; gap: var(--mica-space-2); align-items: center; }
+.time-range .mica-input { width: auto; flex: 0 1 140px; }
+
+/* The matrix. ~120 rows means the header has to stay put and the filter has to
+ * be the first thing reachable, or the table is unusable on a laptop. */
+.matrix-table { font-size: var(--mica-text-caption); }
+.matrix-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--mica-bg-paper);
+    box-shadow: inset 0 -1px 0 var(--mica-divider);
+}
+.matrix-table td { padding: 6px 10px; }
+.matrix-table td:first-child { white-space: nowrap; }
+.matrix-table input[type="checkbox"] { width: 18px; height: 18px; margin: 0; }
+.matrix-table tr[hidden] { display: none; }
+.mica-input-compact { height: 32px; padding: 0 8px; font-size: var(--mica-text-caption); }
+.mica-table-scroll:has(.matrix-table) { max-height: 60vh; overflow-y: auto; }
+.matrix-bulk { display: flex; gap: var(--mica-space-2); margin-top: var(--mica-space-2); }
+.mica-btn-small { height: 32px; padding: 0 12px; font-size: var(--mica-text-caption); }
+.matrix-filter-wrap { margin-bottom: var(--mica-space-2); }
+
+/* Listener index */
+.listener-grid {
+    display: grid; gap: var(--mica-space-4);
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+.listener-card { text-decoration: none; color: inherit; transition: border-color .15s, transform .15s; }
+.listener-card:hover { border-color: var(--mica-accent); transform: translateY(-2px); }
+.listener-summary { font-size: var(--mica-text-body); margin: var(--mica-space-2) 0; }
+
+.status-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--mica-space-4); margin: 0; }
+.status-list dt { color: var(--mica-text-secondary); font-size: var(--mica-text-caption); }
+.status-list dd { margin: 0; font-size: var(--mica-text-body); }
+.status-list .is-error { color: var(--mica-error); }
+
+/* A field hidden by depends_on must not leave a gap behind it. */
+.mica-field[data-depends-on][hidden] { display: none; }

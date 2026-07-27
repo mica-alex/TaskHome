@@ -14,6 +14,7 @@ configurable, and that is only sustainable if a new setting costs a schema
 entry rather than a hand-written form. If a listener needs bespoke settings
 markup, the schema is missing a field type.
 """
+import re
 from datetime import timedelta
 
 from .. import state, storage
@@ -21,6 +22,9 @@ from ..logsetup import log
 
 #: Field types the settings renderer understands. `matrix` is the one that
 #: makes P5-3's per-event-type configuration possible without a bespoke page.
+#: HH:MM, 24-hour. Anchored, because a partial match would accept '99:99abc'.
+TIME_RE = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+
 FIELD_TYPES = ('bool', 'int', 'text', 'secret', 'select', 'multiselect',
                'duration', 'time_range', 'matrix')
 
@@ -127,6 +131,95 @@ class Listener:
         """Runtime state: watermark, seen keys, backoff. Never user-edited."""
         return state.listeners.setdefault(self.name, {})
 
+    def matrix_rows(self, spec, config):
+        """Row keys for a `matrix` field, in display order.
+
+        Defaults to whatever has been configured. A listener that knows its own
+        vocabulary (P5-3 knows the NWS event types) overrides this so the table
+        has useful rows before anything has been seen live.
+        """
+        return sorted((config.get(spec['key']) or {}).keys())
+
+    def matrix_row_default(self, spec, row):
+        """Values for a matrix row that has never been configured."""
+        return {column['key']: column.get('default') for column in spec.get('columns', ())}
+
+    def groups(self):
+        """Schema fields bucketed by `group`, in declaration order.
+
+        Returns [(heading, [spec, ...])]. Ungrouped fields come first under a
+        None heading, which the template renders without a divider.
+        """
+        buckets, order = {}, []
+        for spec in self.CONFIG_SCHEMA:
+            heading = spec.get('group')
+            if heading not in buckets:
+                buckets[heading] = []
+                order.append(heading)
+            buckets[heading].append(spec)
+        return [(heading, buckets[heading]) for heading in order]
+
+    def status(self):
+        """A short line for the listeners index: what it is doing right now."""
+        runtime = self.state()
+        if not self.enabled():
+            return 'Off'
+        if runtime.get('backoff_until'):
+            return f"Backing off after an error: {runtime.get('last_error', 'unknown')}"
+        last = runtime.get('last_check')
+        return f'Last checked {last}' if last else 'Waiting for the first poll'
+
+    def summary(self):
+        """One line describing the current configuration, for the index."""
+        return ''
+
+    def parse_form(self, form):
+        """Turn a submitted form into schema values.
+
+        Structured field types cannot round-trip through a flat form on their
+        own: a `bool` is absent rather than false when unchecked, a `time_range`
+        is two inputs, and a `matrix` is a grid of `events[Wind Advisory][enabled]`
+        names. Unpacking that here means a listener never writes form-parsing
+        code (P2-11).
+        """
+        values = {}
+        for spec in self.CONFIG_SCHEMA:
+            key, kind = spec['key'], spec['type']
+            if kind == 'bool':
+                # Absent means unchecked, so bools are always submitted.
+                values[key] = key in form
+            elif kind == 'time_range':
+                start, end = form.get(f'{key}.start'), form.get(f'{key}.end')
+                if start is not None or end is not None:
+                    values[key] = {'start': start or '00:00', 'end': end or '00:00'}
+            elif kind == 'matrix':
+                values[key] = parse_matrix(spec, form)
+            elif key in form:
+                values[key] = form.get(key)
+        return values
+
+
+def parse_matrix(spec, form):
+    """Collect `events[Wind Advisory][enabled]`-style inputs into a dict.
+
+    Rows are discovered from a hidden `events[]` input per row rather than from
+    the checkbox names, because an all-unchecked row submits nothing at all and
+    would otherwise silently revert to its defaults.
+    """
+    prefix = spec['key']
+    rows = form.getlist(f'{prefix}[]') if hasattr(form, 'getlist') else form.get(f'{prefix}[]', [])
+    result = {}
+    for row in rows:
+        values = {}
+        for column in spec.get('columns', ()):
+            name = f"{prefix}[{row}][{column['key']}]"
+            if column.get('type') == 'bool':
+                values[column['key']] = name in form
+            elif name in form:
+                values[column['key']] = form.get(name)
+        result[row] = values
+    return result
+
 
 def coerce_field(spec, value):
     """Turn a submitted value into the type the schema declares.
@@ -160,9 +253,24 @@ def coerce_field(spec, value):
         items = value if isinstance(value, list) else [
             v.strip() for v in str(value).split(',') if v.strip()]
         return items
+    if kind == 'time_range':
+        if not isinstance(value, dict):
+            raise ValueError(f'{label} must have a start and an end.')
+        for edge in ('start', 'end'):
+            if not TIME_RE.match(str(value.get(edge, ''))):
+                raise ValueError(f'{label} {edge} must be a time like 22:00.')
+        return {'start': value['start'], 'end': value['end']}
+    if kind == 'duration':
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            raise ValueError(f'{label} must be a number of minutes.')
     if kind == 'matrix':
         if not isinstance(value, dict):
             raise ValueError(f'{label} must be an object.')
+        for row, columns in value.items():
+            if not isinstance(columns, dict):
+                raise ValueError(f'{label}: {row} is malformed.')
         return value
     return str(value).strip()
 

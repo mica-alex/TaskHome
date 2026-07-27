@@ -7,10 +7,10 @@ front end can trust resp.ok (P0-10).
 import uuid
 from datetime import datetime, timezone
 
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import abort, Blueprint, redirect, render_template, request, url_for
 
 from .. import constants, printing, queue, receipt, state, storage, styles
-from ..listeners import scf
+from ..listeners import base as listener_base, scf
 from ..settings import get_port  # module name would clash with the route
 from ..logsetup import log
 from . import forms, pagination
@@ -207,9 +207,88 @@ def delete_task():
     return redirect(url_for('main.task_page'))
 
 
-# New route for state.listeners page
-@bp.route('/listener', methods=['GET', 'POST'])  # Note: singular as per your request
+@bp.route('/listener')
 def listener():
+    """The listeners index.
+
+    SeeClickFix keeps a bespoke page because its category picker needs a live
+    lookup that no generic field type expresses; everything else renders from
+    its CONFIG_SCHEMA (P2-11).
+    """
+    cards = []
+
+    scf_config = state.listeners.get('scf') or {}
+    cards.append({
+        'name': 'scf',
+        'title': 'SeeClickFix',
+        'description': ('Prints a receipt for each new issue reported in the '
+                        'categories you subscribe to.'),
+        'url': url_for('main.listener_scf'),
+        'enabled': bool(scf_config.get('enabled')),
+        'interval': scf_config.get('interval') or 10,
+        'last_check': scf_config.get('last_check'),
+        'error': scf_config.get('last_error'),
+        'summary': _scf_summary(scf_config),
+    })
+
+    for name, listener_obj in sorted(listener_base.registry().items()):
+        runtime = state.listeners.get(name) or {}
+        try:
+            summary = listener_obj.summary()
+        except Exception as e:      # a summary must never break the index
+            log.warning(f"Could not summarise {name}: {e}")
+            summary = ''
+        cards.append({
+            'name': name,
+            'title': listener_obj.title,
+            'description': listener_obj.description,
+            'url': url_for('main.listener_settings', name=name),
+            'enabled': listener_obj.enabled(),
+            'interval': listener_obj.interval_minutes(),
+            'last_check': runtime.get('last_check'),
+            'error': runtime.get('last_error'),
+            'summary': summary,
+        })
+
+    return render_template('listener.html', config=state.config, cards=cards)
+
+
+def _scf_summary(scf_config):
+    ids = [p for p in (scf_config.get('request_types') or '').split(',') if p.strip()]
+    return f'{len(ids)} categor{"y" if len(ids) == 1 else "ies"}' if ids else \
+        'No categories yet -- nothing will print.'
+
+
+@bp.route('/listener/settings/<name>', methods=['GET', 'POST'])
+def listener_settings(name):
+    """Render and save any registered listener's settings from its schema.
+
+    There is no per-listener code in this handler, and adding a listener must
+    not require any. `parse_form` unpacks the structured field types and
+    `save_config` validates against the schema, so a bad value produces a
+    message naming the field rather than a 500 (P2-11).
+    """
+    listener_obj = listener_base.get(name)
+    if listener_obj is None:
+        abort(404)
+
+    error = None
+    if request.method == 'POST':
+        try:
+            listener_obj.save_config(listener_obj.parse_form(request.form))
+        except ValueError as e:
+            error = str(e)
+        else:
+            return redirect(url_for('main.listener_settings', name=name))
+
+    return render_template(
+        'listener_settings.html', config_obj=state.config, listener=listener_obj,
+        config=listener_obj.config(), runtime=state.listeners.get(name) or {},
+        error=error)
+
+
+@bp.route('/listener/scf', methods=['GET', 'POST'])
+def listener_scf():
     if request.method == 'POST':
         # listeners['scf'] may not exist yet; the old code indexed it directly
         # to preserve last_check and raised KeyError on a fresh install (P0-9).
@@ -236,7 +315,7 @@ def listener():
         })
         state.listeners['scf'] = updated
         storage.save_listeners()
-        return redirect(url_for('main.listener'))
+        return redirect(url_for('main.listener_scf'))
 
     scf_config = state.listeners.get('scf', {})
     # Names come from the cache; a lookup only happens for ids never seen
@@ -246,7 +325,7 @@ def listener():
     except Exception as e:
         log.warning(f"Could not describe request types: {e}")
         described = []
-    return render_template('listener.html', config=state.config, scf=scf_config,
+    return render_template('listener_scf.html', config=state.config, scf=scf_config,
                            request_types=described)
 
 

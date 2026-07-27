@@ -1,0 +1,153 @@
+{#
+  The schema-driven settings renderer (MASTER_PLAN P2-11).
+
+  One macro per field type, dispatched from a listener's CONFIG_SCHEMA. This
+  is what makes D-7 -- "the more settings the merrier" -- affordable: a new
+  setting costs a schema entry, not a block of hand-written markup that has to
+  be kept in step with a POST handler.
+
+  If a listener ever needs bespoke markup here, the schema is missing a field
+  type. Add the type; do not special-case the listener.
+#}
+
+{% macro field(spec, value, listener=None, config=None) %}
+  {% set kind = spec.type %}
+  <div class="mica-field{{ ' is-checkbox' if kind == 'bool' }}"
+       {% if spec.depends_on %}data-depends-on="{{ spec.depends_on }}"{% endif %}
+       data-field="{{ spec.key }}">
+
+    {% if kind == 'bool' %}
+      <label class="mica-checkbox">
+        <input type="checkbox" name="{{ spec.key }}" id="f-{{ spec.key }}"
+               {% if value %}checked{% endif %}>
+        <span>{{ spec.label }}</span>
+      </label>
+
+    {% elif kind == 'int' %}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <input class="mica-input" type="number" name="{{ spec.key }}" id="f-{{ spec.key }}"
+             value="{{ value if value is not none else '' }}"
+             {% if spec.min is not none %}min="{{ spec.min }}"{% endif %}
+             {% if spec.max is not none %}max="{{ spec.max }}"{% endif %}>
+
+    {% elif kind == 'select' %}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <select class="mica-input" name="{{ spec.key }}" id="f-{{ spec.key }}">
+        {% for option in spec.options %}
+          {% set ov = option[0] if option is not string and option is iterable else option %}
+          {% set ol = option[1] if option is not string and option is iterable else option %}
+          <option value="{{ ov }}" {% if ov == value %}selected{% endif %}>{{ ol }}</option>
+        {% endfor %}
+      </select>
+
+    {% elif kind == 'multiselect' %}
+      {#
+        Rendered as chips over a hidden comma field rather than a bare text
+        input: a list of ZIP codes is easier to check and correct when each one
+        is a separate thing you can delete (X-4).
+      #}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <div class="chips token-chips" data-for="{{ spec.key }}">
+        {% for item in (value or []) %}
+          <span class="mica-chip mica-chip-accent" data-value="{{ item }}">{{ item }}<button
+                type="button" class="chip-remove" data-remove="{{ item }}"
+                aria-label="Remove {{ item }}">&times;</button></span>
+        {% endfor %}
+      </div>
+      <div class="token-add">
+        <input class="mica-input" id="f-{{ spec.key }}" data-token-input="{{ spec.key }}"
+               placeholder="Type and press Enter">
+        <button type="button" class="mica-btn mica-btn-secondary"
+                data-token-add="{{ spec.key }}">Add</button>
+      </div>
+      <input type="hidden" name="{{ spec.key }}" id="v-{{ spec.key }}"
+             value="{{ (value or []) | join(',') }}">
+
+    {% elif kind == 'time_range' %}
+      <label>{{ spec.label }}</label>
+      <div class="time-range">
+        <input class="mica-input" type="time" name="{{ spec.key }}.start"
+               value="{{ (value or {}).get('start', '22:00') }}" aria-label="{{ spec.label }} start">
+        <span class="mica-help">to</span>
+        <input class="mica-input" type="time" name="{{ spec.key }}.end"
+               value="{{ (value or {}).get('end', '07:00') }}" aria-label="{{ spec.label }} end">
+      </div>
+
+    {% elif kind == 'matrix' %}
+      {#
+        The per-alert-type grid. Every row carries a hidden name marker: an
+        all-unchecked row submits no inputs at all, and without the marker the
+        parser could not tell "everything switched off" from "row absent" and
+        would silently restore the defaults.
+      #}
+      <label>{{ spec.label }}</label>
+      <div class="mica-field matrix-filter-wrap">
+        <input class="mica-input" type="search" data-matrix-filter="{{ spec.key }}"
+               placeholder="Filter {{ spec.label | lower }}&hellip;"
+               aria-label="Filter {{ spec.label }}">
+      </div>
+      <div class="mica-table-scroll">
+        <table class="mica-table matrix-table" data-matrix="{{ spec.key }}">
+          <thead>
+            <tr>
+              <th>Type</th>
+              {% for column in spec.columns %}<th>{{ column.label }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in listener.matrix_rows(spec, config) %}
+              {% set stored = (value or {}).get(row) or {} %}
+              {% set defaults = listener.matrix_row_default(spec, row) %}
+              <tr data-row="{{ row }}">
+                <td>
+                  {{ row }}
+                  <input type="hidden" name="{{ spec.key }}[]" value="{{ row }}">
+                </td>
+                {% for column in spec.columns %}
+                  {% set cv = stored.get(column.key, defaults.get(column.key)) %}
+                  <td>
+                    {% if column.type == 'bool' %}
+                      <input type="checkbox" name="{{ spec.key }}[{{ row }}][{{ column.key }}]"
+                             {% if cv %}checked{% endif %}
+                             aria-label="{{ column.label }} for {{ row }}">
+                    {% elif column.type == 'select' %}
+                      <select class="mica-input mica-input-compact"
+                              name="{{ spec.key }}[{{ row }}][{{ column.key }}]"
+                              aria-label="{{ column.label }} for {{ row }}">
+                        {% for option in column.options %}
+                          <option value="{{ option }}" {% if option == cv %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                      </select>
+                    {% else %}
+                      <input class="mica-input mica-input-compact"
+                             name="{{ spec.key }}[{{ row }}][{{ column.key }}]"
+                             value="{{ cv or '' }}" aria-label="{{ column.label }} for {{ row }}">
+                    {% endif %}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="matrix-bulk">
+        <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+                data-matrix-all="{{ spec.key }}">Select all</button>
+        <button type="button" class="mica-btn mica-btn-secondary mica-btn-small"
+                data-matrix-none="{{ spec.key }}">Select none</button>
+      </div>
+
+    {% elif kind == 'secret' %}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <input class="mica-input" type="password" name="{{ spec.key }}" id="f-{{ spec.key }}"
+             value="{{ value or '' }}" autocomplete="off">
+
+    {% else %}
+      <label for="f-{{ spec.key }}">{{ spec.label }}</label>
+      <input class="mica-input" type="text" name="{{ spec.key }}" id="f-{{ spec.key }}"
+             value="{{ value or '' }}">
+    {% endif %}
+
+    {% if spec.help %}<span class="mica-help">{{ spec.help }}</span>{% endif %}
+  </div>
+{% endmacro %}

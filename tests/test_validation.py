@@ -215,7 +215,7 @@ def test_listener_post_on_fresh_install(client, clean_state):
     """listeners['scf'] was indexed directly to preserve last_check, raising
     KeyError before the listener had ever been configured."""
     assert taskhome.state.listeners == {}
-    resp = client.post('/listener', data={'request_types': '6632', 'interval': '10'})
+    resp = client.post('/listener/scf', data={'request_types': '6632', 'interval': '10'})
     assert resp.status_code == 302
     assert taskhome.state.listeners['scf']['interval'] == 10
 
@@ -223,18 +223,18 @@ def test_listener_post_on_fresh_install(client, clean_state):
 def test_listener_preserves_last_check(client, clean_state):
     taskhome.state.listeners['scf'] = {'enabled': True, 'request_types': '1',
                                  'interval': 5, 'last_check': '2026-03-05T09:00:00Z'}
-    client.post('/listener', data={'request_types': '6632', 'interval': '10',
+    client.post('/listener/scf', data={'request_types': '6632', 'interval': '10',
                                    'enabled': 'on'})
     assert taskhome.state.listeners['scf']['last_check'] == '2026-03-05T09:00:00Z'
 
 
 @pytest.mark.parametrize('interval', ['abc', '0', '-1', '99999', ''])
 def test_listener_rejects_bad_interval(client, clean_state, interval):
-    assert client.post('/listener', data={'request_types': '6632',
+    assert client.post('/listener/scf', data={'request_types': '6632',
                                           'interval': interval}).status_code == 400
 
 
 def test_listener_normalises_request_types(client, clean_state):
-    client.post('/listener', data={'request_types': ' 6632 , ,6634 , ',
+    client.post('/listener/scf', data={'request_types': ' 6632 , ,6634 , ',
                                    'interval': '10'})
     assert taskhome.state.listeners['scf']['request_types'] == '6632,6634'

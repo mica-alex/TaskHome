@@ -186,6 +186,33 @@ class NWSListener(base.Listener):
 
     # --- polling -------------------------------------------------------------
 
+    def matrix_rows(self, spec, config):
+        """Known event types first, then anything seen live that is not listed.
+
+        COMMON_EVENTS gives the table useful rows on a fresh install; the union
+        means an alert type this area actually gets is never missing a row just
+        because it was not anticipated.
+        """
+        configured = set((config.get(spec['key']) or {}).keys())
+        return list(COMMON_EVENTS) + sorted(configured - set(COMMON_EVENTS))
+
+    def matrix_row_default(self, spec, row):
+        return default_matrix_row(row)
+
+    def summary(self):
+        config = self.config()
+        zips = config.get('zips') or []
+        if not zips:
+            return 'No ZIP codes yet -- nothing will print.'
+        places = []
+        for code in zips[:3]:
+            try:
+                places.append(resolve_zip(code).get('place') or code)
+            except Exception:
+                places.append(code)
+        more = f' +{len(zips) - 3} more' if len(zips) > 3 else ''
+        return ', '.join(places) + more
+
     def zones(self, config):
         """Forecast and county zones for the configured ZIPs."""
         zones = {}
