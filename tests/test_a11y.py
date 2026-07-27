@@ -130,17 +130,30 @@ def test_status_updates_are_announced(client, path):
 
 
 def test_the_skip_link_is_hidden_until_focused():
-    """It is only meant to be reachable by Tab. It appeared as a bare blue
-    link in the corner once, because the browser was serving a cached
-    stylesheet that predated the rule -- so this asserts the rule exists and
-    that focus is what reveals it.
+    """It is only meant to be reachable by Tab.
+
+    Asserts the *property* -- clipped to nothing, restored on focus -- not a
+    particular technique. It was originally translated off-screen by twice its
+    own height, which depends on its static position: on iOS the appbar's
+    safe-area margin pushed that down far enough that the link landed over the
+    status bar, while desktop looked fine.
     """
     import pathlib
     css = pathlib.Path('taskhome/static/mica.css').read_text()
     block = css[css.index('.skip-link {'):]
     hidden = block[:block.index('}')]
-    assert 'translate' in hidden and '-200%' in hidden, 'not moved off-screen'
-    assert '.skip-link:focus' in css, 'nothing brings it back'
+
+    clipped = 'clip' in hidden or 'clip-path' in hidden
+    tiny = 'width: 1px' in hidden and 'height: 1px' in hidden
+    assert clipped and tiny, 'the resting state is not reliably hidden'
+    assert '-200%' not in hidden, (
+        'hiding by translating a multiple of its own height depends on the '
+        'layout around it, which is what broke on iOS')
+
+    focus = css[css.index('.skip-link:focus'):]
+    revealed = focus[:focus.index('}')]
+    assert 'clip: auto' in revealed or 'clip-path: none' in revealed, \
+        'focus does not undo the clipping'
 
 
 @pytest.mark.parametrize('path', PAGES)
@@ -192,3 +205,17 @@ def test_data_cells_carry_their_own_label(client, path):
         labelled = [c for c in cells if 'data-label' in c]
         # At least one unlabelled cell (the row heading) and the rest labelled.
         assert labelled, f'no labelled cells in a row on {path}'
+
+
+def test_mobile_cards_cannot_overflow_their_container():
+    """width:100% plus the row's padding and border overflows by exactly
+    padding+border, and this stylesheet has no global border-box rule to fall
+    back on. The row cards ran off the right edge of the phone because of it.
+    """
+    import pathlib
+    css = pathlib.Path('taskhome/static/mica.css').read_text()
+    mobile = css[css.index('@media (max-width: 600px)'):]
+    rule = mobile[mobile.index('.mica-table, .mica-table tbody'):]
+    rule = rule[:rule.index('}')]
+    assert 'width: 100%' in rule
+    assert 'box-sizing: border-box' in rule, 'width:100% without border-box'

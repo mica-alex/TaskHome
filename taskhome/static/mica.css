@@ -925,10 +925,40 @@ body.is-disconnected .mica-status-dot::after { content: ' (offline)'; }
 main:focus,
 main:focus-visible { outline: none; }
 
+/*
+ * Clipped to 1x1 rather than translated off-screen.
+ *
+ * translate(-50%, -200%) moves the element by twice its OWN height from its
+ * static position -- and its static position depends on the layout around it.
+ * On iOS the appbar's safe-area top margin pushed that static position down by
+ * about the notch height, so -200% no longer cleared the viewport and the link
+ * appeared over the status bar. It was invisible on desktop, where there is no
+ * inset, which is exactly the kind of bug that ships.
+ *
+ * A 1x1 clipped box cannot be moved back into view by anything around it.
+ */
 .skip-link {
     position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+.skip-link:focus {
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
     left: 50%;
-    transform: translate(-50%, -200%);
+    transform: translateX(-50%);
+    top: calc(12px + env(safe-area-inset-top));
     z-index: 100;
     padding: 10px 18px;
     background: var(--mica-bg-elevated);
@@ -936,9 +966,7 @@ main:focus-visible { outline: none; }
     border: 1px solid var(--mica-accent);
     border-radius: var(--mica-radius-md, 8px);
     text-decoration: none;
-    transition: transform .15s;
 }
-.skip-link:focus { transform: translate(-50%, 12px); }
 
 /* A caption is present on every table for screen readers; hiding it visually
  * keeps the card heading from being said twice. */
@@ -1053,7 +1081,13 @@ main:focus-visible { outline: none; }
     }
 
     .mica-table, .mica-table tbody, .mica-table tr, .mica-table td {
-        display: block; width: 100%;
+        display: block;
+        width: 100%;
+        /* Without this, width:100% plus the row's padding and border overflows
+         * the card by exactly padding+border -- which is why the row cards
+         * ran off the right edge on a phone. There is no global border-box
+         * rule in this stylesheet to fall back on. */
+        box-sizing: border-box;
     }
 
     .mica-table tr {

@@ -34,9 +34,9 @@
           {% for task in tasks %}
           <tr class="{% if not task.enabled %}task-inactive{% endif %}">
             <td>{{ task.title }}</td>
-            <td>{% if task.enabled %}{% with value = task.next_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}{% else %}&mdash;{% endif %}</td>
-            <td>{{ task.recurring }}</td>
-            <td>{% include 'partials/task_status.html' %}</td>
+            <td data-label="Next">{% if task.enabled %}{% with value = task.next_time, aware = false %}{% include 'partials/timestamp.html' %}{% endwith %}{% else %}&mdash;{% endif %}</td>
+            <td data-label="Repeats"><span class="mica-chip mica-chip-muted">{{ task.recurrence_label }}</span></td>
+            <td data-label="Status">{% include 'partials/task_status.html' %}</td>
           </tr>
           {% else %}
           <tr><td colspan="4" class="empty-state">No tasks yet.</td></tr>
