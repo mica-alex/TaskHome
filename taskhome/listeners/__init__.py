@@ -10,7 +10,7 @@ pipeline -- dedup, caps, filtering, templates, history, queue-on-failure -- so
 a pushed receipt behaves exactly like a polled one.
 """
 from . import (base, binday, brief, calendar, feeds, github, mqtt, nws,
-               scf, webhook)
+               scf, transit, webhook)
 
 __all__ = ['base', 'binday', 'brief', 'calendar', 'feeds', 'github', 'mqtt',
-           'nws', 'scf', 'webhook']
+           'nws', 'scf', 'transit', 'webhook']

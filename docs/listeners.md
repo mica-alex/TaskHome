@@ -12,6 +12,7 @@ are two:
 | `brief` | Composes the others | poll | `base.Listener` |
 | `binday` | Bin collection reminder | poll | `base.Listener` |
 | `github` | Releases, builds, issues, PRs | poll | `base.Listener` |
+| `transit` | Departures and service alerts | poll | `base.Listener` |
 | `webhook` | Anything that can POST | **push** | `base.Listener` |
 | `mqtt` | MQTT topics / Home Assistant | **push** | `base.Listener` (optional dep) |
 
@@ -404,6 +405,58 @@ Two behaviours worth knowing:
 - **An exception never escapes into paho's loop.** One that did would kill the
   network thread silently, leaving the listener looking connected while
   receiving nothing at all.
+
+## The transit listener (`listeners/transit.py`)
+
+Next departures from your stops, and a receipt when your line is disrupted.
+
+Built around **providers**, because agencies differ too much for one client:
+
+| Provider | Covers | Notes |
+| --- | --- | --- |
+| `mbta` | Boston | Native V3 JSON API. **No key needed.** Stop search, route names, headsigns, severity-scored alerts. |
+| `gtfsrt` | NYC MTA, and any GTFS-RT feed | Read by `taskhome/gtfsrt.py`. Verified keyless against NYC. |
+
+Adding an agency means adding a provider, not touching the listener.
+
+### Granularity
+
+Two matrices, so subscriptions go from one line to the whole system:
+
+- **Per stop** — departure board, alerts here. A board for the stop you leave
+  from and alerts for a different one is a normal combination, not an edge case.
+- **Per route** — service alerts, and a minimum severity per line. MBTA scores
+  alerts 1–10; 7 is shuttle-bus level. GTFS-RT carries no severity, so `any`
+  applies there.
+
+An alert usually names several routes. Only the **subscribed** ones are
+consulted — otherwise a minor notice on a switched-off line prints anyway just
+because it shares an alert with a line that is on. Among the subscribed lines
+the most permissive threshold wins.
+
+### Things found by probing the live APIs
+
+- **Sorting MBTA predictions ascending by `departure_time` puts NULLs first**,
+  and a cancelled trip has no times at all. An unfiltered board is therefore
+  full of blanks during a disruption — exactly when someone is looking at it.
+  Cancelled and skipped predictions are excluded.
+- **The MBTA has no name-search endpoint** and thousands of stops. The finder
+  searches parent stations (~276), which is what someone naming "North Station"
+  actually means rather than each of its platforms.
+- Boards print at configured times only, and only within 30 minutes of one, or
+  a restart at 23:00 would print every board configured that day.
+
+### GTFS-Realtime without protobuf
+
+`taskhome/gtfsrt.py` reads the feed directly. GTFS-RT is protobuf and the usual
+answer is `gtfs-realtime-bindings`, which pulls in `protobuf` and its C
+extension — a lot to carry on an appliance meant to run untouched for years.
+
+The wire format is self-describing enough to walk without a schema: every field
+is a varint tag carrying a field number and a wire type. The reader decodes
+generically and picks out the dozen field numbers that matter, which are
+written down in the module docstring rather than left as magic. Unknown fields
+are skipped, so a feed that gains one does not break it.
 
 ## The GitHub listener (`listeners/github.py`)
 

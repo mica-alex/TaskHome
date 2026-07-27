@@ -20,6 +20,7 @@ Heights are in printer dots; 203 dpi is almost exactly 8 dots per mm, so
 dots/8 gives millimetres. They are estimates used to compare layouts, not
 promises — line spacing varies slightly with the active font.
 """
+import re
 
 FONTS = {
     'a': {'cols': 48, 'cell_w': 12, 'cell_h': 24},
@@ -155,28 +156,48 @@ def wrap(value, cols):
 
     Mirrors what the printer does: it wraps at the column count, and a word
     longer than a line is split. Newlines in the source are honoured.
+
+    **Runs of spaces are preserved.** This used to join words with a single
+    space, which silently collapsed both indentation and column padding --
+    and since text is pre-wrapped before being sent to the device, that meant
+    the printer could not receive an aligned column layout at all. A departure
+    board is columns; so is any "label     value" line.
+
+    Trailing whitespace is dropped at a line break, because padding at the end
+    of a line is invisible on paper and only risks pushing the wrap early.
     """
     lines = []
     for paragraph in str(value).split('\n'):
         if not paragraph:
             lines.append('')
             continue
+
         current = ''
-        for word in paragraph.split(' '):
+        # Words and whitespace runs alternate, so both survive the round trip.
+        for token in re.findall(r'\S+|\s+', paragraph):
+            if token.isspace():
+                # Whitespace only joins; it never forces a break on its own.
+                # Kept even at the start of a line, because leading spaces are
+                # deliberate indentation -- dropping them is what made an
+                # indented source line read as a second headline.
+                current += token
+                continue
+
+            word = token
             while len(word) > cols:            # break a word too long to fit
                 if current:
-                    lines.append(current)
+                    lines.append(current.rstrip())
                     current = ''
                 lines.append(word[:cols])
                 word = word[cols:]
-            candidate = f'{current} {word}'.strip()
-            if len(candidate) <= cols:
-                current = candidate
+
+            if len(current) + len(word) <= cols:
+                current += word
             else:
                 if current:
-                    lines.append(current)
+                    lines.append(current.rstrip())
                 current = word
-        lines.append(current)
+        lines.append(current.rstrip())
     return lines
 
 
