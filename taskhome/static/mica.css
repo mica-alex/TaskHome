@@ -1,0 +1,242 @@
+/*
+ * Mica-styled components for TaskHome (MASTER_PLAN P2A-2/P2A-3).
+ *
+ * Built on the tokens in vendor/mica-tokens.css. This is additive: it styles
+ * TaskHome's own markup rather than overriding Materialize, so the two can
+ * coexist while Materialize is retired page by page.
+ */
+
+body {
+  font-family: var(--mica-font);
+  font-size: var(--mica-text-body);
+  background-color: var(--mica-bg);
+  color: var(--mica-text);
+}
+
+/* The site's signature ambient wash behind page content. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: var(--mica-ambient);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* --- appbar: the floating translucent pill --------------------------- */
+.mica-appbar {
+  position: sticky;
+  top: var(--mica-appbar-offset);
+  z-index: 100;
+  margin: var(--mica-appbar-offset) auto var(--mica-space-6);
+  max-width: 1100px;
+  padding: var(--mica-appbar-padding);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mica-space-4);
+  border: 1px solid var(--mica-divider);
+  border-radius: var(--mica-radius-lg);
+  background-color: color-mix(in srgb, var(--mica-bg) 40%, transparent);
+  backdrop-filter: blur(var(--mica-appbar-blur));
+  -webkit-backdrop-filter: blur(var(--mica-appbar-blur));
+  box-shadow: var(--mica-shadow-1);
+}
+
+/* color-mix is recent; fall back to a solid bar rather than an unreadable
+   transparent one where it is unsupported. */
+@supports not (background-color: color-mix(in srgb, red 40%, transparent)) {
+  .mica-appbar { background-color: var(--mica-bg-elevated); }
+}
+
+.mica-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--mica-space-2);
+  font-weight: var(--mica-weight-semibold);
+  font-size: var(--mica-text-h6);
+  color: var(--mica-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.mica-brand img { height: 28px; width: auto; display: block; }
+
+.mica-nav { display: flex; align-items: center; gap: var(--mica-space-1); }
+
+.mica-nav a {
+  padding: 6px 12px;
+  border-radius: var(--mica-radius);
+  color: var(--mica-text-muted);
+  text-decoration: none;
+  font-weight: var(--mica-weight-medium);
+  white-space: nowrap;
+}
+
+.mica-nav a:hover {
+  background-color: color-mix(in srgb, var(--mica-accent) 12%, transparent);
+  color: var(--mica-text);
+}
+
+.mica-nav a[aria-current='page'] {
+  color: var(--mica-accent);
+  background-color: color-mix(in srgb, var(--mica-accent) 14%, transparent);
+}
+
+.mica-appbar-actions { display: flex; align-items: center; gap: var(--mica-space-2); }
+
+/* Printer status dot, mirroring the site's compact status affordances. */
+.mica-status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--mica-text-small);
+  color: var(--mica-text-muted);
+}
+
+.mica-status-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--mica-gray-400);
+}
+
+.mica-status-dot.is-online::before { background-color: var(--mica-green-500); }
+.mica-status-dot.is-offline::before { background-color: var(--mica-orange-500); }
+
+/* Below the site's 900px breakpoint the links collapse under the brand
+   rather than overflowing the pill. */
+@media (max-width: 900px) {
+  .mica-appbar {
+    flex-wrap: wrap;
+    margin-top: var(--mica-space-3);
+    top: var(--mica-space-2);
+  }
+  .mica-nav { order: 3; width: 100%; justify-content: space-between; overflow-x: auto; }
+  .mica-nav a { padding: 8px 10px; }   /* larger tap targets (P2B-6) */
+}
+
+/* --- cards: outlined by default, elevation reserved for floating ------ */
+.mica-card {
+  background-color: var(--mica-surface);
+  border: 1px solid var(--mica-divider);
+  border-radius: var(--mica-radius-lg);
+  padding: var(--mica-space-6);
+  margin-bottom: var(--mica-space-6);
+}
+
+.mica-card-title {
+  font-size: var(--mica-text-h5);
+  font-weight: var(--mica-weight-semibold);
+  margin: 0 0 var(--mica-space-4);
+}
+
+/* --- chips ------------------------------------------------------------ */
+.mica-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--mica-radius-pill);
+  border: 1px solid var(--mica-divider);
+  background-color: color-mix(in srgb, var(--mica-accent) 8%, transparent);
+  color: var(--mica-text);
+  font-size: var(--mica-text-small);
+  font-weight: var(--mica-weight-medium);
+  white-space: nowrap;
+}
+
+.mica-chip-muted { background: none; color: var(--mica-text-muted); }
+.mica-chip-accent { border-color: var(--mica-accent); color: var(--mica-accent); }
+
+/* --- buttons ---------------------------------------------------------- */
+.mica-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  min-height: 40px;               /* tap target */
+  border: 1px solid var(--mica-accent);
+  border-radius: var(--mica-radius);
+  background-color: var(--mica-accent);
+  color: var(--mica-accent-text);
+  font: inherit;
+  font-weight: var(--mica-weight-medium);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.mica-btn:hover { filter: brightness(1.08); }
+.mica-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+
+.mica-btn-secondary {
+  background: none;
+  color: var(--mica-text);
+  border-color: var(--mica-divider);
+}
+
+.mica-btn-secondary:hover {
+  background-color: color-mix(in srgb, var(--mica-accent) 10%, transparent);
+}
+
+.mica-btn-danger { background-color: var(--mica-red-500); border-color: var(--mica-red-500); }
+
+/* --- forms ------------------------------------------------------------ */
+.mica-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--mica-space-4); }
+
+.mica-field label {
+  font-size: var(--mica-text-small);
+  font-weight: var(--mica-weight-medium);
+  color: var(--mica-text-muted);
+}
+
+.mica-input,
+.mica-field input,
+.mica-field select,
+.mica-field textarea {
+  padding: 8px 12px;
+  min-height: 40px;
+  border: 1px solid var(--mica-divider);
+  border-radius: var(--mica-radius);
+  background-color: var(--mica-bg-elevated);
+  color: var(--mica-text);
+  font: inherit;
+  box-sizing: border-box;
+  /* Must stay visible without Materialize (P0-15). */
+  display: block !important;
+}
+
+.mica-input:focus,
+.mica-field input:focus,
+.mica-field select:focus {
+  outline: 2px solid var(--mica-accent);
+  outline-offset: 1px;
+  border-color: var(--mica-accent);
+}
+
+.mica-help { font-size: var(--mica-text-small); color: var(--mica-text-muted); }
+
+/* --- tables ----------------------------------------------------------- */
+.mica-table { width: 100%; border-collapse: collapse; font-size: var(--mica-text-body); }
+
+.mica-table th {
+  text-align: left;
+  font-weight: var(--mica-weight-semibold);
+  color: var(--mica-text-muted);
+  font-size: var(--mica-text-small);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--mica-divider);
+}
+
+.mica-table td { padding: 10px 12px; border-bottom: 1px solid var(--mica-divider); }
+.mica-table tr:last-child td { border-bottom: none; }
+.mica-table tbody tr:hover { background-color: color-mix(in srgb, var(--mica-accent) 5%, transparent); }
+
+/* Wide content scrolls inside its own container; the page never scrolls
+   horizontally. */
+.mica-table-scroll { overflow-x: auto; }
+
+.mica-container { max-width: 1100px; margin: 0 auto; padding: 0 var(--mica-space-4) var(--mica-space-8); }

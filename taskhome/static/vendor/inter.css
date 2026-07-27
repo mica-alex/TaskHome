@@ -1,0 +1,17 @@
+/*
+ * Inter, self-hosted (MASTER_PLAN D-4 / P2A-1).
+ *
+ * The Mica theme declares Inter but never loads it, so the site currently
+ * falls back to system sans. TaskHome loads it properly -- and locally, not
+ * from a CDN, because the UI must work with no internet (P0-15).
+ *
+ * Google serves Inter as a single variable font, so one 48 KB file covers
+ * every weight the design uses (400/500/600) rather than three static cuts.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;          /* variable axis */
+  font-display: swap;            /* text shows immediately in the fallback */
+  src: url('fonts/inter-variable.woff2') format('woff2');
+}

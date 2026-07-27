@@ -17,6 +17,16 @@ from . import forms, pagination
 bp = Blueprint('main', __name__)
 
 
+@bp.app_context_processor
+def inject_printer_status():
+    """Make the printer state available to every template.
+
+    The appbar shows a status dot on all pages, and probing per render is
+    cheap -- one usb.core.find, which is what /settings already did.
+    """
+    return {'printer_online': printing.is_printer_connected()}
+
+
 @bp.route('/')
 def index():
     status = 'Connected' if printing.is_printer_connected() else 'Not connected'

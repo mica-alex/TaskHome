@@ -89,3 +89,58 @@ def test_theme_mode_and_effective_theme_are_separate():
     base = (TEMPLATES / 'base.html').read_text()
     assert 'data-theme-mode' in base
     assert "getAttribute('data-theme-mode')" in base
+
+
+# --- Mica design system (P2A) -------------------------------------------------
+
+def test_design_tokens_are_vendored_not_fetched():
+    tokens = (VENDOR / 'mica-tokens.css').read_text()
+    assert '--mica-brand-400' in tokens
+    for host in REMOTE_HOSTS:
+        assert host not in tokens
+
+
+def test_inter_is_self_hosted():
+    """D-4 picked Inter; it must be local, since the UI works offline."""
+    css = (VENDOR / 'inter.css').read_text()
+    assert 'fonts/inter-variable.woff2' in css
+    assert 'https://' not in css
+    assert (VENDOR / 'fonts' / 'inter-variable.woff2').stat().st_size > 1000
+
+
+def test_brand_palette_matches_the_site_theme():
+    """Transcribed from themePrimitives.ts, which is what actually ships --
+    the written design page disagrees with it in places."""
+    tokens = (VENDOR / 'mica-tokens.css').read_text()
+    assert 'hsl(210, 98%, 48%)' in tokens     # brand 400
+    assert 'hsl(220, 35%, 3%)' in tokens      # gray 900
+
+
+def test_appbar_matches_the_site_spec():
+    tokens = (VENDOR / 'mica-tokens.css').read_text()
+    assert '--mica-appbar-blur: 24px' in tokens
+    assert '--mica-appbar-alpha: 0.4' in tokens
+    assert '--mica-appbar-offset: 28px' in tokens
+    assert '--mica-appbar-breakpoint: 900px' in tokens
+
+
+def test_both_themes_define_every_semantic_token():
+    """A token defined for one theme only renders as an invalid value in the
+    other, which fails silently and looks like a styling glitch."""
+    import re
+    css = (VENDOR / 'mica-tokens.css').read_text()
+
+    def tokens_in(block):
+        return set(re.findall(r'(--mica-(?:bg|surface|text|divider|accent|shadow|ambient)[\w-]*)\s*:', block))
+
+    light = css[css.index(":root[data-theme='light']"):css.index(":root[data-theme='dark']")]
+    dark = css[css.index(":root[data-theme='dark']"):]
+    missing = tokens_in(light) - tokens_in(dark)
+    assert not missing, f'dark theme is missing {missing}'
+
+
+def test_mica_inputs_survive_without_materialize():
+    """styles.css hides native selects; the Mica field styles must override
+    that or every dropdown vanishes offline (P0-15)."""
+    css = (REPO / 'taskhome' / 'static' / 'mica.css').read_text()
+    assert 'display: block !important' in css

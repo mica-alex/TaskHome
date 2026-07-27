@@ -17,6 +17,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/materialize.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/material-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr.min.css') }}">
+    <!-- Mica design system: tokens, then Inter, then components (P2A) -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/mica-tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/inter.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mica.css') }}">
+    <link rel="preload" as="font" type="font/woff2" crossorigin
+          href="{{ url_for('static', filename='vendor/fonts/inter-variable.woff2') }}">
     <!-- Custom styles -->
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script>
@@ -43,25 +49,75 @@
             } else if (darkQuery.addListener) {
                 darkQuery.addListener(applyTheme);
             }
+
+            /*
+             * Appbar toggle. Cycles system -> light -> dark and remembers the
+             * choice locally, so it takes effect immediately without a round
+             * trip. The saved config value remains the source of truth on load;
+             * this is an override for the current browser.
+             */
+            var MODES = ['system', 'light', 'dark'];
+            var stored = null;
+            try { stored = localStorage.getItem('taskhome-theme'); } catch (e) { /* private mode */ }
+            if (stored && MODES.indexOf(stored) !== -1) {
+                root.setAttribute('data-theme-mode', stored);
+                applyTheme();
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                var button = document.getElementById('theme-toggle');
+                if (!button) return;
+                function label() {
+                    var mode = root.getAttribute('data-theme-mode') || 'system';
+                    button.textContent = mode === 'light' ? '☀' : mode === 'dark' ? '☾' : '◐';
+                    button.title = 'Theme: ' + mode + ' (click to change)';
+                }
+                label();
+                button.addEventListener('click', function () {
+                    var current = root.getAttribute('data-theme-mode') || 'system';
+                    var next = MODES[(MODES.indexOf(current) + 1) % MODES.length];
+                    root.setAttribute('data-theme-mode', next);
+                    try { localStorage.setItem('taskhome-theme', next); } catch (e) { /* ignore */ }
+                    applyTheme();
+                    label();
+                });
+            });
         })();
     </script>
 </head>
 <body>
-    <nav>
-        <div class="nav-wrapper">
-            <div class="brand-logo-container">
-                <img src="{{ url_for('static', filename='logo.png') }}" class="brand-logo-img">
-                <span class="brand-logo">TaskHome</span>
-            </div>
-            <ul id="nav-mobile" class="right">
-                <li><a href="{{ url_for('main.index') }}">Home</a></li>
-                <li><a href="{{ url_for('main.task_page') }}">Tasks</a></li>
-                <li><a href="{{ url_for('main.settings') }}">Settings</a></li>
-                <li><a href="{{ url_for('main.listener') }}">Listener</a></li>
-            </ul>
+    {#
+      The Mica floating pill appbar (P2A-3), transcribed from the site's
+      MicaAppBar: 16px radius, 24px blur, 40% background, divider border,
+      28px offset, collapsing at the site's 900px breakpoint.
+    #}
+    <header class="mica-appbar">
+        <a class="mica-brand" href="{{ url_for('main.index') }}">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="">
+            <span>TaskHome</span>
+        </a>
+        <nav class="mica-nav" aria-label="Main">
+            <a href="{{ url_for('main.index') }}"
+               {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>Home</a>
+            <a href="{{ url_for('main.task_page') }}"
+               {% if request.endpoint == 'main.task_page' %}aria-current="page"{% endif %}>Tasks</a>
+            <a href="{{ url_for('main.listener') }}"
+               {% if request.endpoint == 'main.listener' %}aria-current="page"{% endif %}>Listeners</a>
+            <a href="{{ url_for('main.settings') }}"
+               {% if request.endpoint == 'main.settings' %}aria-current="page"{% endif %}>Settings</a>
+        </nav>
+        <div class="mica-appbar-actions">
+            {% if printer_online is defined %}
+            <span class="mica-status-dot {{ 'is-online' if printer_online else 'is-offline' }}"
+                  title="{{ 'Printer connected' if printer_online else 'Printer not connected' }}">
+                {{ 'Ready' if printer_online else 'No printer' }}
+            </span>
+            {% endif %}
+            <button type="button" class="mica-btn mica-btn-secondary" id="theme-toggle"
+                    aria-label="Toggle theme" title="Toggle light / dark">◐</button>
         </div>
-    </nav>
-    <main class="container">
+    </header>
+    <main class="mica-container container">
         {% block content %}
         {% endblock %}
     </main>

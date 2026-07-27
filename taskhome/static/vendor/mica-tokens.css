@@ -1,0 +1,137 @@
+/*
+ * Mica Technologies design tokens (MASTER_PLAN P2A-1).
+ *
+ * Extracted from the real theme in website-micatechnologies-com --
+ * src/components/shared-theme/themePrimitives.ts -- not from the written
+ * design page, because the two disagree and the code is what ships.
+ *
+ * The site expresses these in MUI TypeScript, which cannot be vendored
+ * directly, so they are transcribed here as custom properties. If the site's
+ * palette changes, update this file; the canonical copy lives in the site
+ * repo. See docs/design.md.
+ */
+
+:root {
+  /* --- brand: hsl(210, 98-100%, L) ------------------------------------ */
+  --mica-brand-50:  hsl(210, 100%, 95%);
+  --mica-brand-100: hsl(210, 100%, 92%);
+  --mica-brand-200: hsl(210, 100%, 80%);
+  --mica-brand-300: hsl(210, 100%, 65%);
+  --mica-brand-400: hsl(210, 98%, 48%);
+  --mica-brand-500: hsl(210, 98%, 42%);
+  --mica-brand-600: hsl(210, 98%, 55%);
+  --mica-brand-700: hsl(210, 100%, 35%);
+  --mica-brand-800: hsl(210, 100%, 16%);
+  --mica-brand-900: hsl(210, 100%, 21%);
+
+  /* --- gray: hsl(220, 20-35%, L) -------------------------------------- */
+  --mica-gray-50:  hsl(220, 35%, 97%);
+  --mica-gray-100: hsl(220, 30%, 94%);
+  --mica-gray-200: hsl(220, 20%, 88%);
+  --mica-gray-300: hsl(220, 20%, 80%);
+  --mica-gray-400: hsl(220, 20%, 65%);
+  --mica-gray-500: hsl(220, 20%, 42%);
+  --mica-gray-600: hsl(220, 20%, 35%);
+  --mica-gray-700: hsl(220, 20%, 25%);
+  --mica-gray-800: hsl(220, 30%, 6%);
+  --mica-gray-900: hsl(220, 35%, 3%);
+
+  /* --- status --------------------------------------------------------- */
+  --mica-green-500:  hsl(120, 60%, 35%);
+  --mica-orange-500: hsl(45, 90%, 40%);
+  --mica-red-500:    hsl(0, 65%, 45%);
+
+  /* --- type ----------------------------------------------------------- */
+  /* The theme declares Inter (D-4). It is vendored rather than fetched
+     from a CDN, because the UI must work offline (P0-15). */
+  --mica-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+               Roboto, Helvetica, Arial, sans-serif;
+  --mica-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo,
+                    Consolas, monospace;
+
+  --mica-text-h1: 3rem;      /* 48px, weight 600 */
+  --mica-text-h2: 2.25rem;   /* 36px, weight 600 */
+  --mica-text-h3: 1.875rem;  /* 30px */
+  --mica-text-h4: 1.5rem;    /* 24px, weight 600 */
+  --mica-text-h5: 1.25rem;   /* 20px, weight 600 */
+  --mica-text-h6: 1.125rem;  /* 18px, weight 600 */
+  --mica-text-body: 0.875rem;    /* 14px */
+  --mica-text-small: 0.75rem;    /* 12px */
+
+  --mica-weight-normal: 400;
+  --mica-weight-medium: 500;
+  --mica-weight-semibold: 600;
+
+  /* --- shape ---------------------------------------------------------- */
+  /* The theme's shape.borderRadius is 8; the appbar uses that + 8. */
+  --mica-radius: 8px;
+  --mica-radius-lg: 16px;
+  --mica-radius-pill: 999px;
+
+  /* --- spacing (MUI's 8px base) --------------------------------------- */
+  --mica-space-1: 4px;
+  --mica-space-2: 8px;
+  --mica-space-3: 12px;
+  --mica-space-4: 16px;
+  --mica-space-6: 24px;
+  --mica-space-8: 32px;
+
+  /* --- appbar, transcribed from MicaAppBar.tsx ------------------------ */
+  --mica-appbar-blur: 24px;
+  --mica-appbar-alpha: 0.4;      /* background.default at 40% */
+  --mica-appbar-offset: 28px;    /* mt on the AppBar root */
+  --mica-appbar-padding: 8px 12px;
+  --mica-appbar-breakpoint: 900px;
+}
+
+/* --- light ------------------------------------------------------------ */
+:root,
+:root[data-theme='light'] {
+  --mica-bg: var(--mica-gray-50);
+  --mica-bg-elevated: #fff;
+  --mica-surface: #fff;
+  --mica-text: var(--mica-gray-800);
+  --mica-text-muted: var(--mica-gray-500);
+  --mica-divider: hsl(220, 20%, 88%);
+  --mica-accent: var(--mica-brand-400);
+  --mica-accent-text: #fff;
+  --mica-shadow-1: 0 1px 2px hsl(220 20% 50% / 0.08),
+                   0 2px 8px hsl(220 20% 50% / 0.06);
+  /* Signature ambient wash behind page content. */
+  --mica-ambient: radial-gradient(ellipse 80% 50% at 50% -20%,
+                  hsl(210, 100%, 92%), transparent);
+}
+
+/* --- dark ------------------------------------------------------------- */
+:root[data-theme='dark'] {
+  --mica-bg: var(--mica-gray-900);
+  --mica-bg-elevated: var(--mica-gray-800);
+  --mica-surface: hsl(220, 26%, 9%);
+  --mica-text: var(--mica-gray-100);
+  --mica-text-muted: var(--mica-gray-400);
+  --mica-divider: hsl(220, 20%, 25%);
+  --mica-accent: var(--mica-brand-600);
+  --mica-accent-text: #fff;
+  --mica-shadow-1: 0 1px 2px hsl(220 35% 2% / 0.4),
+                   0 2px 8px hsl(220 35% 2% / 0.3);
+  --mica-ambient: radial-gradient(ellipse 80% 50% at 50% -20%,
+                  hsl(210, 100%, 16%), transparent);
+}
+
+/* The theme toggle stamps data-theme, but honour the OS before it runs so
+   there is no flash of the wrong theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --mica-bg: var(--mica-gray-900);
+    --mica-bg-elevated: var(--mica-gray-800);
+    --mica-surface: hsl(220, 26%, 9%);
+    --mica-text: var(--mica-gray-100);
+    --mica-text-muted: var(--mica-gray-400);
+    --mica-divider: hsl(220, 20%, 25%);
+    --mica-accent: var(--mica-brand-600);
+    --mica-shadow-1: 0 1px 2px hsl(220 35% 2% / 0.4),
+                     0 2px 8px hsl(220 35% 2% / 0.3);
+    --mica-ambient: radial-gradient(ellipse 80% 50% at 50% -20%,
+                    hsl(210, 100%, 16%), transparent);
+  }
+}
