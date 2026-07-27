@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% block title %}Receipt Styles{% endblock %}
+{% block content %}
+{#
+  Receipt Style Studio (MASTER_PLAN P3-4).
+
+  The preview is rendered by the SERVER, not by JavaScript. A JS
+  re-implementation would be a second renderer that can disagree with the
+  printer -- which is precisely the failure this design exists to prevent, and
+  which already happened once when the printer hard-wrapped mid-word while the
+  preview wrapped on word boundaries. Every preview here comes from the same
+  receipt.py that drives the print head.
+#}
+<div class="mica-card">
+  <h1 class="mica-card-title">Receipt Styles</h1>
+  <p class="mica-help">
+    Edit what prints, and see it before it costs paper. The preview is produced
+    by the same renderer as the printer, so what you see is what comes out.
+  </p>
+
+  <div class="studio-kinds">
+    {% for k in kinds %}
+      <a class="mica-chip {{ 'mica-chip-accent' if k == kind }}"
+         href="{{ url_for('main.receipt_studio', kind=k) }}">
+        {{ 'Task reminders' if k == 'task' else 'SeeClickFix issues' }}
+      </a>
+    {% endfor %}
+    <span class="mica-help">Active: <strong>{{ active }}</strong></span>
+  </div>
+</div>
+
+<div class="studio">
+  <div class="mica-card studio-editor">
+    <h2 class="mica-card-title">Blocks</h2>
+
+    <div class="mica-field">
+      <label for="template-name">Template name</label>
+      <input id="template-name" class="mica-input" value="{{ template.name }}"
+             {% if template.builtin %}data-builtin="1"{% endif %}>
+      {% if template.builtin %}
+        <span class="mica-help">
+          This is the built-in default and can't be overwritten &mdash; saving
+          creates a copy under a new name.
+        </span>
+      {% endif %}
+    </div>
+
+    <div id="blocks"></div>
+
+    <div class="studio-actions">
+      <button type="button" class="mica-btn mica-btn-secondary" data-add="text">+ Text</button>
+      <button type="button" class="mica-btn mica-btn-secondary" data-add="rule">+ Divider</button>
+      <button type="button" class="mica-btn mica-btn-secondary" data-add="gap">+ Space</button>
+      <button type="button" class="mica-btn mica-btn-secondary" data-add="qr">+ QR</button>
+      <button type="button" class="mica-btn mica-btn-secondary" data-add="barcode">+ Barcode</button>
+    </div>
+
+    <details class="studio-placeholders">
+      <summary>Available placeholders</summary>
+      <p class="mica-help">Click to insert into the focused text field.</p>
+      {% for name in placeholders %}
+        <button type="button" class="mica-chip mica-chip-muted"
+                data-placeholder="{{ name }}">{{ '{' ~ name ~ '}' }}</button>
+      {% endfor %}
+    </details>
+  </div>
+
+  <div class="mica-card studio-preview">
+    <h2 class="mica-card-title">Preview</h2>
+    <div class="receipt-paper"><pre id="preview-lines">{{ preview.lines | join('\n') }}</pre></div>
+    <p class="mica-help" id="preview-meta">
+      {{ preview.height_mm }} mm &middot; {{ preview.columns }} columns
+    </p>
+    <div id="preview-error" class="studio-error" hidden></div>
+
+    <div class="studio-actions">
+      <button type="button" class="mica-btn" id="save-btn">Save &amp; use</button>
+      <button type="button" class="mica-btn mica-btn-secondary" id="save-only-btn">Save</button>
+      <button type="button" class="mica-btn mica-btn-secondary" id="test-print-btn">
+        Test print &mdash; uses paper
+      </button>
+    </div>
+
+    <h3 class="mica-help" style="margin-top:1.5rem">Saved templates</h3>
+    <ul class="studio-list">
+      {% for t in templates %}
+        <li>
+          <a href="{{ url_for('main.receipt_studio', kind=kind, name=t.name) }}">{{ t.name }}</a>
+          {% if t.name == active %}<span class="mica-chip mica-chip-accent">active</span>{% endif %}
+          {% if t.builtin %}<span class="mica-chip mica-chip-muted">built-in</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<script id="template-data" type="application/json">{{ template | tojson }}</script>
+<script src="{{ url_for('static', filename='studio.js') }}"></script>
+{% endblock %}

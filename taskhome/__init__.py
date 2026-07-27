@@ -16,14 +16,14 @@ from .settings import get_host, get_port
 # and so on resolve after a plain `import taskhome`. This is only safe because
 # importing them has no side effects -- no files read, no threads started, no
 # hardware touched. Keep it that way.
-from . import layouts, receipt, recurrence, printing, scheduler, storage
+from . import layouts, receipt, recurrence, printing, scheduler, storage, styles
 from . import listeners, settings, web, logsetup
 
 __all__ = [
     'create_app', 'init_app', 'get_host', 'get_port', 'log',
     # Re-exported so `import taskhome` gives access to every module.
     'constants', 'state', 'storage', 'recurrence', 'printing', 'scheduler',
-    'receipt', 'layouts', 'listeners', 'settings', 'web', 'logsetup',
+    'receipt', 'layouts', 'listeners', 'settings', 'styles', 'web', 'logsetup',
 ]
 
 

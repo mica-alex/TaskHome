@@ -204,41 +204,47 @@ def test_bad_payload_fails_before_opening_the_printer(isolated, fake_printer):
 
 # --- the shared renderer is actually what prints -------------------------------
 
-def test_print_task_uses_the_shared_layout(isolated, fake_printer, monkeypatch):
-    """print_task must render layouts.task_receipt, not its own hand-rolled
-    sequence -- otherwise the preview describes something that never prints."""
-    seen = {}
+def test_print_task_renders_the_active_template(isolated, fake_printer):
+    """print_task goes through the template layer, not a hand-rolled sequence.
 
-    def spy(task, qr_url, when=None):
-        seen['task'] = task
-        seen['url'] = qr_url
-        return [taskhome.receipt.text('SPY')]
-
-    monkeypatch.setattr(taskhome.layouts, 'task_receipt', spy)
+    The built-in template is generated from layouts.py, so the default output
+    is identical either way -- but having one path means an edited template
+    cannot behave differently from the shipped one.
+    """
     device = fake_printer()
+    blocks = taskhome.printing.task_blocks(dict(TASK))
+    rendered = '\n'.join(taskhome.receipt.render_text(blocks))
 
+    assert 'Take Medicine' in rendered          # placeholders resolved
+    assert '{title}' not in rendered
     assert taskhome.printing.print_task(dict(TASK)) is True
-    assert seen['task']['id'] == 'abc'
-    assert 'task_page#abc' in seen['url']
     assert 'cut' in device.calls
 
 
-def test_print_scf_uses_the_shared_layout(isolated, fake_printer, monkeypatch):
-    seen = {}
+def test_task_blocks_use_the_selected_template(isolated, fake_printer, monkeypatch):
+    monkeypatch.setattr(taskhome.styles, 'get_template',
+                        lambda kind, name: {'name': 'x', 'kind': 'task', 'version': 1,
+                                            'blocks': [{'type': 'text', 'value': 'CUSTOM {title}'}]})
+    blocks = taskhome.printing.task_blocks(dict(TASK))
+    assert 'CUSTOM Take Medicine' in '\n'.join(taskhome.receipt.render_text(blocks))
 
-    def spy(issue, **kwargs):
-        seen.update(kwargs)
-        return [taskhome.receipt.text('SPY')]
 
-    monkeypatch.setattr(taskhome.layouts, 'scf_receipt', spy)
+def test_print_scf_renders_the_active_template(isolated, fake_printer):
     fake_printer()
-
     issue = dict(BASE_ISSUE, media={'image_full': 'x', 'video_url': 'v'},
                  description='Broken')
     assert taskhome.printing.print_scf_issue(issue) is True
-    assert seen['category'] == 'Pothole'
-    assert seen['has_media'] is True
-    assert seen['has_video'] is True          # video_url was previously ignored
+    assert taskhome.state.history[0]['has_video'] is True   # was previously ignored
+
+
+def test_scf_blocks_resolve_every_placeholder(isolated):
+    blocks = taskhome.printing.scf_blocks(
+        BASE_ISSUE, category='Pothole', address='1 Main St', reported_at='9:00 AM',
+        status='Open', has_media=True, has_video=True, description='A hole')
+    rendered = '\n'.join(taskhome.receipt.render_text(blocks))
+    for expected in ('Pothole', '1 Main St', 'Open', '9:00 AM', 'Photo & Video', 'A hole'):
+        assert expected in rendered, f'{expected!r} missing'
+    assert '{' not in rendered, 'an unresolved placeholder reached the receipt'
 
 
 def test_no_barcode_on_the_new_scf_layout(isolated, fake_printer):

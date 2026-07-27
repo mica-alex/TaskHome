@@ -14,7 +14,7 @@ from datetime import datetime
 import usb.core
 from escpos.printer import Usb
 
-from . import constants, layouts, receipt, settings, state, storage
+from . import constants, layouts, receipt, settings, state, storage, styles
 from .logsetup import log
 
 
@@ -64,6 +64,44 @@ def task_qr_url(task):
     return task.get('url', '') or f"http://{hostname}:{settings.get_port()}/task_page#{task['id']}"
 
 
+def task_blocks(task, when=None):
+    """Blocks for a task receipt, from whichever template is active.
+
+    Always goes through the template layer, even for the default: the built-in
+    preset is generated from layouts.py, so this is the same output either way,
+    and having one path means an edited template cannot behave differently from
+    the shipped one in some subtle way.
+    """
+    context = {
+        'title': task.get('title', ''),
+        'extra': task.get('extra', ''),
+        'recurrence': layouts.recurrence_label(task.get('recurring', 'none')),
+        'printed': layouts._stamp(when),
+        'id': layouts._short_id(task.get('id', '')),
+        'qr_url': task_qr_url(task),
+    }
+    template = styles.get_template('task', styles.active_template_name('task'))
+    return styles.fill(template, context)
+
+
+def scf_blocks(issue, category, address, reported_at, status, has_media,
+               has_video=False, description='', when=None):
+    """Blocks for an SCF receipt, from whichever template is active."""
+    context = {
+        'category': category,
+        'address': address,
+        'status': status,
+        'reported': reported_at,
+        'media': layouts.media_label(has_media, has_video),
+        'description': description,
+        'id': str(issue.get('id', '?')),
+        'printed': layouts._stamp(when),
+        'qr_url': issue.get('html_url') or '',
+    }
+    template = styles.get_template('scf', styles.active_template_name('scf'))
+    return styles.fill(template, context)
+
+
 def print_task(task):
     """Print a task receipt. Returns True only if paper actually came out.
 
@@ -79,7 +117,7 @@ def print_task(task):
         log.warning("Printer not connected, skipping print")
         return False
     try:
-        blocks = layouts.task_receipt(task, task_qr_url(task))
+        blocks = task_blocks(task)
         with open_printer() as p:
             receipt.render_escpos(blocks, p)
             p.cut()
@@ -152,10 +190,10 @@ def print_scf_issue(issue):  # New: Custom print for SCF issues
     description = issue.get('description') or ''
 
     try:
-        blocks = layouts.scf_receipt(
+        blocks = scf_blocks(
             issue, category=category, address=address, reported_at=reported_at,
-            status=status, has_media=has_media, description=description,
-            has_video=has_video)
+            status=status, has_media=has_media, has_video=has_video,
+            description=description)
         with open_printer() as p:
             receipt.render_escpos(blocks, p)
             p.cut()

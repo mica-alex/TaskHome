@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, redirect, render_template, request, url_for
 
-from .. import constants, printing, state, storage
+from .. import constants, printing, receipt, state, storage, styles
 from ..settings import get_port  # module name would clash with the route
 from ..logsetup import log
 from . import forms, pagination
@@ -228,3 +228,100 @@ def listener():
 
 
 scheduler_thread = None
+
+
+# --- Receipt Style Studio (P3-4) ----------------------------------------------
+
+@bp.route('/settings/receipts')
+def receipt_studio():
+    kind = request.args.get('kind', 'task')
+    if kind not in styles.KINDS:
+        kind = 'task'
+    name = request.args.get('name') or styles.active_template_name(kind)
+    template = styles.get_template(kind, name)
+    return render_template(
+        'receipt_studio.html',
+        config=state.config,
+        kind=kind,
+        kinds=styles.KINDS,
+        template=template,
+        templates=styles.list_templates(kind),
+        active=styles.active_template_name(kind),
+        placeholders=sorted(styles.PLACEHOLDERS[kind]),
+        preview=styles.preview(template),
+    )
+
+
+@bp.route('/api/receipt/preview', methods=['POST'])
+def api_receipt_preview():
+    """Render a template to preview lines.
+
+    Server-side on purpose. A JavaScript re-implementation would be a second
+    renderer that can disagree with the printer, which is the exact failure the
+    shared renderer exists to prevent -- and it has already happened once, when
+    the printer hard-wrapped mid-word while the preview wrapped on words.
+    """
+    payload = request.get_json(silent=True) or {}
+    try:
+        return {'ok': True, **styles.preview(payload.get('template') or {},
+                                             payload.get('context'))}
+    except styles.TemplateError as e:
+        return {'ok': False, 'error': str(e)}, 400
+
+
+@bp.route('/api/receipt/templates/<kind>', methods=['POST'])
+def api_save_template(kind):
+    payload = request.get_json(silent=True) or {}
+    template = payload.get('template') or {}
+    template['kind'] = kind
+    try:
+        saved = styles.save_template(template)
+    except styles.TemplateError as e:
+        return {'ok': False, 'error': str(e)}, 400
+    if payload.get('activate'):
+        styles.set_active_template(kind, saved['name'])
+    return {'ok': True, 'name': saved['name'],
+            'active': styles.active_template_name(kind)}
+
+
+@bp.route('/api/receipt/activate/<kind>/<name>', methods=['POST'])
+def api_activate_template(kind, name):
+    if kind not in styles.KINDS:
+        return {'ok': False, 'error': 'Unknown receipt kind.'}, 400
+    styles.set_active_template(kind, name)
+    return {'ok': True, 'active': styles.active_template_name(kind)}
+
+
+@bp.route('/api/receipt/templates/<kind>/<name>', methods=['DELETE'])
+def api_delete_template(kind, name):
+    try:
+        styles.delete_template(kind, name)
+    except styles.TemplateError as e:
+        return {'ok': False, 'error': str(e)}, 400
+    if styles.active_template_name(kind) == name:
+        styles.set_active_template(kind, f'{kind}-default')
+    return {'ok': True}
+
+
+@bp.route('/api/receipt/test_print/<kind>', methods=['POST'])
+def api_template_test_print(kind):
+    """Print the template being edited. Emits real paper."""
+    if kind not in styles.KINDS:
+        return {'ok': False, 'error': 'Unknown receipt kind.'}, 400
+    if not printing.is_printer_connected():
+        return {'ok': False, 'error': 'Printer not connected.'}, 503
+    payload = request.get_json(silent=True) or {}
+    try:
+        template = styles.validate_template(payload.get('template') or {})
+    except styles.TemplateError as e:
+        return {'ok': False, 'error': str(e)}, 400
+
+    blocks = styles.fill(template, styles.sample_context(kind))
+    try:
+        with printing.open_printer() as p:
+            receipt.render_escpos(blocks, p)
+            p.cut()
+    except Exception as e:
+        log.error(f"Template test print failed: {e}", exc_info=True)
+        return {'ok': False, 'error': str(e)}, 500
+    return {'ok': True}
