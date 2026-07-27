@@ -17,9 +17,9 @@ call. MASTER_PLAN `P5-1` introduces the plugin interface.
 ```
 
 See [data-model.md](data-model.md#listenersjson) for field semantics. The
-request-type IDs are raw SCF category ids (e.g. 6632 = "Signal Repair",
-City of Manchester DPW); the UI stores and displays them as an opaque comma
-string with no name lookup (MASTER_PLAN Phase 4 redesigns this).
+request-type IDs are raw SCF category ids (e.g. 6632 = "Signal Repair", City of
+Manchester DPW). They are still *stored* as a comma string, but the UI resolves
+and displays them as named chips — see "Request-type names and discovery" below.
 
 ### Poll cycle
 
