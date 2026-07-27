@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Problem{% endblock %}
+{% block content %}
+{#
+  Shown when a form submission is rejected (P0-9). Deliberately plain: the
+  submitted values are lost on the way here, which is the main reason
+  MASTER_PLAN P2-4 replaces this with inline field errors and toasts once the
+  /api/ layer lands. Until then, this is at least an honest, styled page
+  instead of a Flask 500 traceback.
+#}
+<div class="card">
+    <div class="card-content">
+        <span class="card-title">That didn't work</span>
+        <p>{{ message }}</p>
+    </div>
+    <div class="card-action">
+        <a href="javascript:history.back()">Go back and fix it</a>
+        <a href="{{ url_for('index') }}">Home</a>
+    </div>
+</div>
+{% endblock %}

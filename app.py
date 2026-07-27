@@ -30,6 +30,10 @@ LISTENERS_FILE = 'listeners.json'  # New file for listener configs
 # Catch-up policy (P1-10): what happens to occurrences that came due while
 # TaskHome was down. Resolution order is per-task 'catchup', then
 # oneoff_policy for one-offs, then policy. See docs/scheduling.md.
+RECURRENCE_MODES = ('none', 'daily', 'weekly', 'monthly', 'every_weekday',
+                    'first_day_month', 'custom')
+THEMES = ('system', 'light', 'dark')
+
 CATCHUP_POLICIES = ('skip', 'print_once', 'print_all', 'print_if_recent')
 DEFAULT_CATCHUP = {
     'policy': 'skip',              # recurring: losing one of many occurrences
@@ -850,11 +854,24 @@ def settings():
             history = []
             save_history()
             return redirect(url_for('settings'))
-        config['max_history'] = int(request.form['max_history'])
-        config['hostname'] = request.form['hostname']
-        config['theme'] = request.form['theme']
+        raw_max = request.form.get('max_history', '')
+        try:
+            max_history = int(raw_max)
+        except (TypeError, ValueError):
+            return reject(f"'{raw_max}' is not a valid history size.")
+        if not 0 <= max_history <= 100000:
+            return reject('History size must be between 0 and 100000.')
+
+        theme = request.form.get('theme', 'system')
+        if theme not in THEMES:
+            return reject(f"'{theme}' is not a valid theme.")
+
+        config['max_history'] = max_history
+        config['hostname'] = (request.form.get('hostname') or '').strip() or \
+            DEFAULT_CONFIG['hostname']
+        config['theme'] = theme
         save_config()
-        history[:] = history[:config['max_history']]
+        del history[max_history:]
         save_history()
         return redirect(url_for('settings'))
     printer_info = {
@@ -924,21 +941,103 @@ def test_scf_print():
         return f'Test SCF print failed: {e}. <a href="/settings">Back</a>', 500
 
 
+class ValidationError(Exception):
+    """A form submission was rejected. Carries a user-facing message."""
+
+
+def normalize_next_time(raw, fallback=None):
+    """Turn a datetime-local form value into a stored naive-local ISO string.
+
+    The form yields 'YYYY-MM-DDTHH:MM'; seconds were previously appended
+    blindly, producing '...T21:00:00:00' when the browser already included
+    them. Parse first, then re-serialise from the parsed value, so the stored
+    form is always canonical regardless of what the browser sent (P0-9).
+    """
+    raw = (raw or '').strip()
+    if not raw:
+        if fallback is not None:
+            return fallback
+        return datetime.now().replace(microsecond=0).isoformat()
+    try:
+        return parse_task_time(raw).isoformat()
+    except (ValueError, TypeError):
+        raise ValidationError(f"'{raw}' is not a valid date and time.")
+
+
+def parse_days(raw_days):
+    """Weekday indices from the form, deduped and ordered. 0=Mon .. 6=Sun."""
+    days = set()
+    for value in raw_days:
+        try:
+            day = int(value)
+        except (TypeError, ValueError):
+            raise ValidationError(f"'{value}' is not a valid weekday.")
+        if not 0 <= day <= 6:
+            raise ValidationError(f"Weekday {day} is out of range.")
+        days.add(day)
+    return sorted(days)
+
+
+def task_from_form(form, existing=None):
+    """Build or update a task from form data, validating as we go.
+
+    Raises ValidationError with a message suitable for showing the user. The
+    task dict is only mutated once every field has validated, so a rejected
+    edit can't leave a task half-updated.
+    """
+    title = (form.get('title') or '').strip()
+    if not title:
+        raise ValidationError('Title is required.')
+
+    recurring = form.get('recurring') or 'none'
+    if recurring not in RECURRENCE_MODES:
+        raise ValidationError(f"'{recurring}' is not a valid recurrence.")
+
+    next_time = normalize_next_time(
+        form.get('next_time'), fallback=existing['next_time'] if existing else None)
+
+    days = parse_days(form.getlist('days')) if recurring == 'custom' else None
+    if recurring == 'custom' and not days:
+        # Without this the schedule can never advance (P0-2).
+        raise ValidationError('Pick at least one weekday for a custom recurrence.')
+
+    task = existing if existing is not None else {'id': str(uuid.uuid4())}
+    task['title'] = title
+    task['next_time'] = next_time
+    task['recurring'] = recurring
+    task['enabled'] = 'enabled' in form
+
+    for field in ('extra', 'url'):
+        value = (form.get(field) or '').strip()
+        if value:
+            task[field] = value
+        else:
+            task.pop(field, None)
+
+    if days:
+        task['days'] = days
+    else:
+        task.pop('days', None)
+
+    # A successful edit clears any prior failure state, since the user has
+    # just told us what the schedule should be.
+    task.pop('schedule_error', None)
+    task.pop('missed', None)
+    return task
+
+
+def reject(message, status=400):
+    """Render a validation failure. Kept plain until P2-4 brings in toasts."""
+    app.logger.info(f"Rejected form submission: {message}")
+    return render_template('error.html', message=message), status
+
+
 @app.route('/add_task', methods=['POST'])
 def add_task():
-    task = {
-        'id': str(uuid.uuid4()),
-        'title': request.form['title'],
-        'next_time': request.form['next_time'] + ':00' if request.form['next_time'] else datetime.now().isoformat(),
-        'recurring': request.form['recurring'],
-        'enabled': 'enabled' in request.form
-    }
-    if 'extra' in request.form and request.form['extra']:
-        task['extra'] = request.form['extra']
-    if 'url' in request.form and request.form['url']:
-        task['url'] = request.form['url']
-    if task['recurring'] == 'custom':
-        task['days'] = [int(d) for d in request.form.getlist('days')]
+    try:
+        task = task_from_form(request.form)
+    except ValidationError as e:
+        return reject(str(e))
     tasks.append(task)
     save_tasks()
     return redirect(url_for('task_page'))
@@ -950,22 +1049,14 @@ def edit_task(task_id):
     if not task:
         return 'Task not found', 404
     if request.method == 'POST':
-        task['title'] = request.form['title']
-        task['next_time'] = request.form['next_time'] + ':00' if request.form['next_time'] else task['next_time']
-        task['recurring'] = request.form['recurring']
-        task['enabled'] = 'enabled' in request.form
-        if 'extra' in request.form and request.form['extra']:
-            task['extra'] = request.form['extra']
-        else:
-            task.pop('extra', None)
-        if 'url' in request.form and request.form['url']:
-            task['url'] = request.form['url']
-        else:
-            task.pop('url', None)
-        if task['recurring'] == 'custom':
-            task['days'] = [int(d) for d in request.form.getlist('days')]
-        else:
-            task.pop('days', None)
+        try:
+            # Validate against a copy so a rejected edit leaves the live task
+            # untouched rather than partially applied.
+            candidate = task_from_form(request.form, existing=dict(task))
+        except ValidationError as e:
+            return reject(str(e))
+        task.clear()
+        task.update(candidate)
         save_tasks()
         return redirect(url_for('task_page'))
     return render_template('tasks.html', config=config, tasks=tasks,
@@ -974,9 +1065,14 @@ def edit_task(task_id):
 
 @app.route('/delete_task', methods=['POST'])
 def delete_task():
-    task_id = request.form['id']
+    task_id = request.form.get('id')
+    if not task_id:
+        return reject('No task specified.')
     global tasks
-    tasks = [t for t in tasks if t['id'] != task_id]
+    remaining = [t for t in tasks if t.get('id') != task_id]
+    if len(remaining) == len(tasks):
+        return reject('That task no longer exists.', status=404)
+    tasks[:] = remaining
     save_tasks()
     return redirect(url_for('task_page'))
 
@@ -985,11 +1081,27 @@ def delete_task():
 @app.route('/listener', methods=['GET', 'POST'])  # Note: singular as per your request
 def listener():
     if request.method == 'POST':
+        # listeners['scf'] may not exist yet; the old code indexed it directly
+        # to preserve last_check and raised KeyError on a fresh install (P0-9).
+        existing = listeners.get('scf') or {}
+
+        raw_interval = request.form.get('interval', '')
+        try:
+            interval = int(raw_interval)
+        except (TypeError, ValueError):
+            return reject(f"'{raw_interval}' is not a valid interval.")
+        if not 1 <= interval <= 1440:
+            return reject('Interval must be between 1 and 1440 minutes.')
+
+        request_types = ','.join(
+            part.strip() for part in (request.form.get('request_types') or '').split(',')
+            if part.strip())
+
         listeners['scf'] = {
             'enabled': 'enabled' in request.form,
-            'request_types': request.form.get('request_types', '6632,6634'),
-            'interval': int(request.form.get('interval', 10)),
-            'last_check': listeners['scf'].get('last_check')  # Preserve existing last_check
+            'request_types': request_types,
+            'interval': interval,
+            'last_check': existing.get('last_check'),  # Preserve existing last_check
         }
         save_listeners()
         return redirect(url_for('listener'))

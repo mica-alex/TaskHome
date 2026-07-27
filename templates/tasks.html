@@ -100,7 +100,7 @@
                     </select>
                     <label>Recurring</label>
                 </div>
-                <div id="custom-days" style="display:none;">
+                <div id="custom-days" class="custom-days" style="display:none;">
                     <p>Repeat on:</p>
                     <p>
                         <label><input type="checkbox" name="days" value="0"/><span>Mon</span></label>
@@ -156,7 +156,7 @@
                     </select>
                     <label>Recurring</label>
                 </div>
-                <div id="custom_days_{{ task.id }}" style="display:{{ 'block' if task.recurring == 'custom' else 'none' }};">
+                <div id="custom_days_{{ task.id }}" class="custom-days" style="display:{{ 'block' if task.recurring == 'custom' else 'none' }};">
                     <p>Repeat on:</p>
                     <p>
                         <label><input type="checkbox" name="days" value="0" {{ 'checked' if task.days and 0 in task.days }}><span>Mon</span></label>
@@ -187,12 +187,11 @@
             var recurringSelects = document.querySelectorAll('select[name="recurring"]');
             recurringSelects.forEach(function(select) {
                 select.addEventListener('change', function() {
-                    var customDays = this.closest('form').querySelector('[id^="custom-days"]');
-                    if (this.value === 'custom') {
-                        customDays.style.display = 'block';
-                    } else {
-                        customDays.style.display = 'none';
-                    }
+                    var form = this.closest('form');
+                    if (!form) return;
+                    var customDays = form.querySelector('.custom-days');
+                    if (!customDays) return;
+                    customDays.style.display = this.value === 'custom' ? 'block' : 'none';
                 });
             });
         });
