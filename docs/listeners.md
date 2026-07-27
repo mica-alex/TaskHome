@@ -131,3 +131,31 @@ There is no abstraction. You must:
 
 MASTER_PLAN Phase 5 (`P5-1`) specifies a proper plugin interface to replace
 steps 1–4.
+
+
+## Request-type names and discovery (P4-1/P4-2/P4-3)
+
+`request_types` is stored as a comma string of numeric ids, which says nothing
+about what is actually subscribed. The settings page now shows named chips.
+
+Names come from `GET /api/v2/request_types/:id` and are cached in
+`data/cache/scf_request_types.json` for 30 days — titles are effectively
+static, and a LAN appliance should not need the network to render its own
+settings page.
+
+Deliberate behaviours:
+
+- An id whose lookup **404s** is remembered as missing rather than retried, so
+  a dead subscription does not mean a network round trip on every page load.
+  It still appears in the list, marked, rather than silently vanishing.
+- A **network failure keeps the stale name** — an out-of-date title beats none.
+- The cache is written directly rather than through `_save_json_file`: it is
+  derived data, so it needs neither backups nor the write-block protection that
+  guards real state.
+
+### Discovery
+
+There is **no search-by-name endpoint**. Categories are discovered by location
+through the report-a-problem form, `GET /api/v2/issues/new?lat=&lng=`, which
+lists everything reportable at a point — 37 for Manchester NH. The picker
+groups them by organization and filters client-side.

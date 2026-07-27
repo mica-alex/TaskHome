@@ -1,38 +1,98 @@
 {% extends 'base.html' %}
-
 {% block title %}Listeners{% endblock %}
-
 {% block content %}
+{#
+  SeeClickFix listener settings (MASTER_PLAN P4-1/P4-2/P4-3).
 
-    <h5>SeeClickFix Listener Settings</h5>
+  Request types were an opaque comma string of numeric ids. They are now named
+  chips, with the names cached locally so opening this page does not depend on
+  the network.
+#}
+<div class="mica-card">
+  <h1 class="mica-card-title">SeeClickFix</h1>
+  <p class="mica-help">
+    Polls SeeClickFix and prints a receipt for each new issue in the categories
+    you subscribe to.
+  </p>
 
-    <div class="card">
-        <div class="card-content">
-            <form method="POST">
-                <div class="input-field">
-                    <p>
-                        <label>
-                            <input type="checkbox" name="enabled" {% if scf.enabled %}checked{% endif %}/>
-                            <span>Enabled</span>
-                        </label>
-                    </p>
-                </div>
-
-                <div class="input-field">
-                    <input id="request_types" name="request_types" type="text" value="{{ scf.request_types or '6632,6634' }}" required>
-                    <label for="request_types">Request Type IDs (comma-delimited, e.g., 6632,6634)</label>
-                </div>
-
-                <div class="input-field">
-                    <input id="interval" name="interval" type="number" value="{{ scf.interval or 10 }}">
-                    <label for="interval">Check Interval (minutes)</label>
-                </div>
-
-                <button class="btn waves-effect waves-light" type="submit">Save
-                    <i class="material-icons right">save</i>
-                </button>
-            </form>
-        </div>
+  <form method="POST" action="{{ url_for('main.listener') }}" id="scf-form">
+    <div class="mica-field">
+      <label>
+        <input type="checkbox" name="enabled" {% if scf.enabled %}checked{% endif %}>
+        Enabled
+      </label>
     </div>
 
+    <div class="mica-field">
+      <label for="interval">Check every (minutes)</label>
+      <input id="interval" class="mica-input" type="number" name="interval"
+             min="1" max="1440" value="{{ scf.interval or 10 }}">
+      <span class="mica-help">
+        The scheduler ticks every 60 seconds; this is the minimum gap between polls.
+      </span>
+    </div>
+
+    <div class="mica-field">
+      <label>Subscribed categories</label>
+      <div class="chips" id="type-chips">
+        {% for rt in request_types %}
+          <span class="mica-chip {{ 'mica-chip-accent' if rt.known else 'mica-chip-muted' }}"
+                data-id="{{ rt.id }}"
+                title="{{ rt.organization or 'Unknown organization' }}">
+            {% if rt.known %}
+              {{ rt.title }}
+            {% elif rt.missing %}
+              #{{ rt.id }} &mdash; no longer exists
+            {% else %}
+              #{{ rt.id }}
+            {% endif %}
+            <button type="button" class="chip-remove" data-remove="{{ rt.id }}"
+                    aria-label="Remove {{ rt.title or rt.id }}">&times;</button>
+          </span>
+        {% else %}
+          <span class="mica-help">None yet &mdash; nothing will print.</span>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="request_types" id="request-types"
+             value="{{ scf.request_types or '' }}">
+      <span class="mica-help">
+        Organizations shown on hover. Names are cached locally, so this page
+        works offline.
+      </span>
+    </div>
+
+    <div class="studio-actions">
+      <button type="submit" class="mica-btn">Save</button>
+      <button type="button" class="mica-btn mica-btn-secondary" id="browse-btn">
+        Browse categories&hellip;
+      </button>
+    </div>
+  </form>
+</div>
+
+<div class="mica-card" id="browse-panel" hidden>
+  <h2 class="mica-card-title">Find categories</h2>
+  <p class="mica-help">
+    SeeClickFix has no search-by-name endpoint, so categories are discovered by
+    location &mdash; it lists everything reportable at a point.
+  </p>
+  <div class="browse-controls">
+    <div class="mica-field">
+      <label for="lat">Latitude</label>
+      <input id="lat" class="mica-input" value="42.9956">
+    </div>
+    <div class="mica-field">
+      <label for="lng">Longitude</label>
+      <input id="lng" class="mica-input" value="-71.4548">
+    </div>
+    <button type="button" class="mica-btn" id="browse-go">Look up</button>
+  </div>
+  <div class="mica-field">
+    <label for="browse-filter">Filter</label>
+    <input id="browse-filter" class="mica-input" placeholder="pothole, signal, police&hellip;">
+  </div>
+  <div id="browse-results" class="browse-results"></div>
+</div>
+
+<script src="{{ url_for('static', filename='listener.js') }}"></script>
 {% endblock %}

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, redirect, render_template, request, url_for
 
 from .. import constants, printing, receipt, state, storage, styles
+from ..listeners import scf
 from ..settings import get_port  # module name would clash with the route
 from ..logsetup import log
 from . import forms, pagination
@@ -200,7 +201,7 @@ def delete_task():
 @bp.route('/listener', methods=['GET', 'POST'])  # Note: singular as per your request
 def listener():
     if request.method == 'POST':
-        # state.listeners['scf'] may not exist yet; the old code indexed it directly
+        # listeners['scf'] may not exist yet; the old code indexed it directly
         # to preserve last_check and raised KeyError on a fresh install (P0-9).
         existing = state.listeners.get('scf') or {}
 
@@ -216,18 +217,60 @@ def listener():
             part.strip() for part in (request.form.get('request_types') or '').split(',')
             if part.strip())
 
-        state.listeners['scf'] = {
+        updated = dict(existing)
+        updated.update({
             'enabled': 'enabled' in request.form,
             'request_types': request_types,
             'interval': interval,
             'last_check': existing.get('last_check'),  # Preserve existing last_check
-        }
+        })
+        state.listeners['scf'] = updated
         storage.save_listeners()
         return redirect(url_for('main.listener'))
-    return render_template('listener.html', config=state.config, scf=state.listeners.get('scf', {}))
+
+    scf_config = state.listeners.get('scf', {})
+    # Names come from the cache; a lookup only happens for ids never seen
+    # before, so opening this page does not depend on the network.
+    try:
+        described = scf.describe_request_types(scf_config.get('request_types', ''))
+    except Exception as e:
+        log.warning(f"Could not describe request types: {e}")
+        described = []
+    return render_template('listener.html', config=state.config, scf=scf_config,
+                           request_types=described)
 
 
-scheduler_thread = None
+@bp.route('/api/scf/browse')
+def api_scf_browse():
+    """Request types offered at a location, for the picker (P4-3).
+
+    The API has no search-by-name endpoint, so discovery goes through the
+    report-a-problem form, which lists everything available for a place.
+    """
+    try:
+        lat = float(request.args.get('lat', ''))
+        lng = float(request.args.get('lng', ''))
+    except (TypeError, ValueError):
+        return {'ok': False, 'error': 'Give a latitude and longitude.'}, 400
+    try:
+        return {'ok': True, 'request_types': scf.browse_request_types(lat, lng)}
+    except Exception as e:
+        log.warning(f"SCF browse failed: {e}")
+        return {'ok': False, 'error': f'Could not reach SeeClickFix: {e}'}, 502
+
+
+@bp.route('/api/scf/names', methods=['POST'])
+def api_scf_names():
+    """Look up names for ids, so the picker can label a pasted list."""
+    payload = request.get_json(silent=True) or {}
+    ids = payload.get('ids') or []
+    if not isinstance(ids, list) or len(ids) > 100:
+        return {'ok': False, 'error': 'Give a list of at most 100 ids.'}, 400
+    try:
+        return {'ok': True,
+                'request_types': scf.describe_request_types(','.join(str(i) for i in ids))}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}, 502
 
 
 # --- Receipt Style Studio (P3-4) ----------------------------------------------

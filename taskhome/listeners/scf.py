@@ -8,12 +8,14 @@ fetch, so anything created during the request fell between windows.
 There is a per-poll receipt ceiling because fixing pagination removed the
 accidental protection the old truncation provided.
 """
+import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import requests
 from dateutil import parser
 
-from .. import printing, state, storage
+from .. import constants, printing, state, storage
 from ..logsetup import log
 
 
@@ -244,3 +246,133 @@ def poll_scf_listener(now_utc):
         f"SCF listener checked at {scf['last_check']}: "
         f"{len(issues)} fetched, {len(fresh)} new, {printed} printed")
     return printed
+
+
+# --- request-type names (P4-1) ------------------------------------------------
+#
+# The config stores raw numeric ids ("6632,6634,6630"), which tell you nothing
+# about what you have subscribed to. The API can name them, so they are looked
+# up once and cached: names change rarely, and a LAN appliance should not need
+# the network to render its own settings page.
+
+SCF_REQUEST_TYPE_URL = 'https://seeclickfix.com/api/v2/request_types'
+SCF_NEW_ISSUE_URL = 'https://seeclickfix.com/api/v2/issues/new'
+CACHE_FILENAME = 'scf_request_types.json'
+CACHE_TTL_DAYS = 30          # titles are effectively static; this is a re-check
+
+
+def cache_path():
+    return os.path.join(constants.DATA_DIR, 'cache', CACHE_FILENAME)
+
+
+def load_name_cache():
+    try:
+        with open(cache_path()) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_name_cache(cache):
+    path = cache_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except OSError as e:
+        log.warning(f"Could not create the cache directory: {e}")
+        return False
+    # Not via _save_json_file: the cache is derived data, so it needs neither
+    # backups nor the write-block protection that guards real state.
+    try:
+        with open(path, 'w') as f:
+            json.dump(cache, f, indent=2)
+        return True
+    except OSError as e:
+        log.warning(f"Could not write the request-type cache: {e}")
+        return False
+
+
+def _is_fresh(entry):
+    fetched = parse_utc(entry.get('fetched_at'))
+    if fetched is None:
+        return False
+    return (datetime.now(timezone.utc) - fetched) < timedelta(days=CACHE_TTL_DAYS)
+
+
+def request_type_names(ids, refresh=False):
+    """Map request-type ids to {'title', 'organization'}.
+
+    Cached entries are used without contacting the API. A lookup that fails
+    is remembered as a placeholder rather than retried on every page load --
+    an id that no longer exists would otherwise mean a network round trip
+    every time the settings page is opened.
+    """
+    cache = load_name_cache()
+    changed = False
+
+    for raw in ids:
+        key = str(raw).strip()
+        if not key:
+            continue
+        entry = cache.get(key)
+        if entry and _is_fresh(entry) and not refresh:
+            continue
+        try:
+            resp = requests.get(f'{SCF_REQUEST_TYPE_URL}/{key}', timeout=10)
+            if resp.status_code == 404:
+                cache[key] = {'title': None, 'organization': None,
+                              'missing': True,
+                              'fetched_at': datetime.now(timezone.utc).isoformat()}
+                changed = True
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            cache[key] = {
+                'title': data.get('title'),
+                'organization': data.get('organization'),
+                'fetched_at': datetime.now(timezone.utc).isoformat(),
+            }
+            changed = True
+        except Exception as e:
+            log.warning(f"Could not look up SCF request type {key}: {e}")
+            # Leave any stale entry in place: an out-of-date name beats none.
+
+    if changed:
+        save_name_cache(cache)
+    return cache
+
+
+def describe_request_types(request_types, refresh=False):
+    """Configured ids as display records, in configured order.
+
+    Always returns one record per id, even when the lookup failed, so the
+    settings page shows the id rather than silently dropping a subscription.
+    """
+    ids = [part.strip() for part in str(request_types or '').split(',') if part.strip()]
+    cache = request_type_names(ids, refresh=refresh)
+    described = []
+    for key in ids:
+        entry = cache.get(key) or {}
+        described.append({
+            'id': key,
+            'title': entry.get('title'),
+            'organization': entry.get('organization'),
+            'missing': bool(entry.get('missing')),
+            'known': bool(entry.get('title')),
+        })
+    return described
+
+
+def browse_request_types(lat, lng):
+    """Request types available at a location, for the picker (P4-3).
+
+    There is no search-by-name endpoint, so discovery goes through the
+    report-a-problem form, which lists everything offered for a place.
+    """
+    resp = requests.get(SCF_NEW_ISSUE_URL, params={'lat': lat, 'lng': lng}, timeout=20)
+    resp.raise_for_status()
+    types = (resp.json() or {}).get('request_types') or []
+    return sorted(
+        ({'id': str(t.get('id')), 'title': t.get('title'),
+          'organization': t.get('organization')} for t in types if t.get('id')),
+        key=lambda t: ((t['organization'] or ''), (t['title'] or '')))
