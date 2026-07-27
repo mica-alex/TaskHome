@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.micatechnologies.taskhome.plist - macOS launchd agent for TaskHome.
+
+  Install:  cp deploy/com.micatechnologies.taskhome.plist ~/Library/LaunchAgents/
+  Load:     launchctl load -w ~/Library/LaunchAgents/com.micatechnologies.taskhome.plist
+  Unload:   launchctl unload -w ~/Library/LaunchAgents/com.micatechnologies.taskhome.plist
+  Logs:     tail -f ~/GitProjects/TaskHome/logs/taskhome.log
+
+  Set your username in the paths below.
+
+  macOS needs no udev equivalent -- libusb talks to the printer through
+  IOKit -- but note port 5000 is taken by AirPlay Receiver, so TASKHOME_PORT
+  is set here. Remove it if you disable AirPlay Receiver instead.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.micatechnologies.taskhome</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/CHANGE_ME/GitProjects/TaskHome/scripts/run.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/CHANGE_ME/GitProjects/TaskHome</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>TASKHOME_PORT</key>
+    <string>5001</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/CHANGE_ME/GitProjects/TaskHome/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/CHANGE_ME/GitProjects/TaskHome/logs/launchd.err.log</string>
+</dict>
+</plist>

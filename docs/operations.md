@@ -157,6 +157,34 @@ Read-only: no receipts, no saves, no migration. It reports per task how many
 occurrences were missed, which policy applies, and how many receipts that
 means, plus the SeeClickFix window and how many issues sit in it.
 
+## Running as a service
+
+```sh
+./deploy/install.sh            # detects the platform, asks before changing anything
+./deploy/healthcheck.sh        # exits 0 when healthy
+./scripts/backups.py list      # what snapshots exist
+```
+
+See [deploy/README.md](../deploy/README.md). On Linux the udev rule is not
+optional: without it libusb can only claim the printer as root, and the service
+reports "Printer not connected" with no other symptom.
+
+## Backups
+
+Every write snapshots the file it is about to replace into
+`data/backups/<store>/`, keeping the newest 20 (configurable via
+`config['backups']`). Identical content is not snapshotted twice.
+
+```sh
+./scripts/backups.py list tasks
+./scripts/backups.py show tasks 20260727T132012
+./scripts/backups.py restore tasks 20260727T132012 --confirm
+```
+
+Stop TaskHome before restoring — the scheduler rewrites `tasks.json` and
+`listeners.json` on its own and would overwrite what you just put back. A
+restore snapshots the current file first, so it is itself undoable.
+
 ## Printer calibration
 
 ```sh

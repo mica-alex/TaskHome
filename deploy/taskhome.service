@@ -1,0 +1,62 @@
+# taskhome.service - Linux systemd *system* service for TaskHome.
+#
+# Install:  sudo cp deploy/taskhome.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now taskhome
+# Logs:     journalctl -u taskhome -f
+#
+# A system service rather than a user service (the busylight daemon is a user
+# service) because TaskHome is an appliance: it must start at boot without
+# anyone logging in, and keep running after they log out.
+#
+# Prereqs:
+#   1. deploy/99-taskhome-printer.rules installed, so the service user can
+#      open the printer without root.
+#   2. The service user is in the 'plugdev' group:
+#        sudo usermod -aG plugdev CHANGE_ME
+#   3. ./scripts/setup-venv.sh has been run at least once.
+#
+# Change User=, Group= and the two paths below.
+
+[Unit]
+Description=TaskHome scheduled receipt printer
+Documentation=file:///opt/taskhome/docs/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGE_ME
+Group=CHANGE_ME
+SupplementaryGroups=plugdev
+WorkingDirectory=/opt/taskhome
+
+# run.sh repairs the virtualenv before starting, so a host that loses its
+# Python interpreter recovers on the next restart instead of failing forever.
+ExecStart=/opt/taskhome/scripts/run.sh
+
+# Restart always, not on-failure: a clean exit is still an appliance that has
+# stopped printing, which is the failure the owner cares about.
+Restart=always
+RestartSec=10
+
+# Let it settle rather than giving up during a boot-time network or USB race.
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+Environment=PYTHONUNBUFFERED=1
+# Uncomment to move state off the checkout, e.g. onto a data volume:
+# Environment=TASKHOME_DATA_DIR=/var/lib/taskhome
+# Environment=TASKHOME_LOG_LEVEL=INFO
+# Environment=TASKHOME_PORT=5000
+
+# Modest hardening. Deliberately NOT PrivateDevices=yes: that hides /dev/bus/usb
+# and the printer disappears.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/taskhome/data /opt/taskhome/logs
+
+[Install]
+WantedBy=multi-user.target

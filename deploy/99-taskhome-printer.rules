@@ -1,0 +1,18 @@
+# 99-taskhome-printer.rules - non-root USB access to the Epson TM-T20III.
+#
+# Install:  sudo cp deploy/99-taskhome-printer.rules /etc/udev/rules.d/
+#           sudo udevadm control --reload-rules && sudo udevadm trigger
+#           then unplug and replug the printer
+#
+# Without this, libusb can only claim the device as root, and the service
+# reports "Printer not connected" no matter what. Verify with:
+#   ls -l /dev/bus/usb/*/*    (the printer's node should be group-writable)
+#
+# TAG+="uaccess" covers a desktop session; the group is what a headless
+# service user needs, so both are set.
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="04b8", ATTR{idProduct}=="0e27", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Some Epson models also bind the usblp kernel driver, which then holds the
+# device and makes libusb fail with "Resource busy". Unbind it for this one.
+ACTION=="add", SUBSYSTEM=="usbmisc", KERNEL=="lp[0-9]*", ATTRS{idVendor}=="04b8", ATTRS{idProduct}=="0e27", RUN+="/bin/sh -c 'echo -n $kernel > /sys/bus/usb/drivers/usblp/unbind'"
