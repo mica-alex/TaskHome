@@ -35,21 +35,21 @@ import threading
 
 import pytest
 
-import app as taskhome
+import taskhome
 
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
-    monkeypatch.setattr(taskhome, 'APP_ROOT', str(tmp_path / 'repo'))
-    monkeypatch.setattr(taskhome, 'DATA_DIR', str(tmp_path))
-    monkeypatch.setattr(taskhome, 'TASKS_FILE', str(tmp_path / 'tasks.json'))
-    monkeypatch.setattr(taskhome, 'HISTORY_FILE', str(tmp_path / 'history.json'))
-    monkeypatch.setattr(taskhome, 'tasks', [])
-    monkeypatch.setattr(taskhome, 'history', [])
-    monkeypatch.setattr(taskhome, 'config', dict(taskhome.DEFAULT_CONFIG))
-    taskhome._load_failed.clear()
+    monkeypatch.setattr(taskhome.constants, 'APP_ROOT', str(tmp_path / 'repo'))
+    monkeypatch.setattr(taskhome.constants, 'DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(taskhome.constants, 'TASKS_FILE', str(tmp_path / 'tasks.json'))
+    monkeypatch.setattr(taskhome.constants, 'HISTORY_FILE', str(tmp_path / 'history.json'))
+    monkeypatch.setattr(taskhome.state, 'tasks', [])
+    monkeypatch.setattr(taskhome.state, 'history', [])
+    monkeypatch.setattr(taskhome.state, 'config', dict(taskhome.constants.DEFAULT_CONFIG))
+    taskhome.state.load_failed.clear()
     yield tmp_path
-    taskhome._load_failed.clear()
+    taskhome.state.load_failed.clear()
 
 
 def task(n):
@@ -71,16 +71,16 @@ def test_saving_while_mutating_does_not_raise_or_tear(store):
     def mutate():
         n = 0
         while not stop.is_set():
-            with taskhome.STATE_LOCK:
-                taskhome.tasks.append(task(n))
-                if len(taskhome.tasks) > 50:
-                    del taskhome.tasks[:25]
+            with taskhome.state.STATE_LOCK:
+                taskhome.state.tasks.append(task(n))
+                if len(taskhome.state.tasks) > 50:
+                    del taskhome.state.tasks[:25]
             n += 1
 
     def save():
         try:
             for _ in range(200):
-                taskhome.save_tasks()
+                taskhome.storage.save_tasks()
         except Exception as e:  # noqa: BLE001 - recording it is the point
             errors.append(e)
 
@@ -101,7 +101,7 @@ def test_concurrent_history_writes_lose_nothing(store):
     """record_history from several threads drops and duplicates nothing."""
     threads = [
         threading.Thread(target=lambda i=i: [
-            taskhome.record_history({'id': f'{i}-{j}', 'type': 'task'})
+            taskhome.printing.record_history({'id': f'{i}-{j}', 'type': 'task'})
             for j in range(20)
         ])
         for i in range(5)
@@ -111,15 +111,15 @@ def test_concurrent_history_writes_lose_nothing(store):
     for t in threads:
         t.join(timeout=10)
 
-    assert len(taskhome.history) == 100
-    assert len({record['id'] for record in taskhome.history}) == 100
+    assert len(taskhome.state.history) == 100
+    assert len({record['id'] for record in taskhome.state.history}) == 100
 
 
 def test_history_cap_holds_under_concurrency(store):
-    taskhome.config['max_history'] = 30
+    taskhome.state.config['max_history'] = 30
     threads = [
         threading.Thread(target=lambda i=i: [
-            taskhome.record_history({'id': f'{i}-{j}', 'type': 'task'})
+            taskhome.printing.record_history({'id': f'{i}-{j}', 'type': 'task'})
             for j in range(40)
         ])
         for i in range(4)
@@ -129,27 +129,27 @@ def test_history_cap_holds_under_concurrency(store):
     for t in threads:
         t.join(timeout=10)
 
-    assert len(taskhome.history) == 30
+    assert len(taskhome.state.history) == 30
 
 
 def test_lock_is_reentrant(store):
     """save_* is called from inside already-locked sections (record_history
     does exactly this), so a non-reentrant Lock would deadlock. This one is
     load-bearing: swapping RLock for Lock hangs the suite."""
-    with taskhome.STATE_LOCK:
-        with taskhome.STATE_LOCK:
-            assert taskhome.save_tasks() is True
+    with taskhome.state.STATE_LOCK:
+        with taskhome.state.STATE_LOCK:
+            assert taskhome.storage.save_tasks() is True
 
 
-def test_clear_history_mutates_in_place(store):
+def test_clear_history_mutates_in_place(store, app):
     """Rebinding the global would detach it from lists other code already
     holds, sending their writes to an orphan."""
-    taskhome.history.extend([{'id': 'a', 'type': 'task'}])
-    held = taskhome.history
+    taskhome.state.history.extend([{'id': 'a', 'type': 'task'}])
+    held = taskhome.state.history
 
-    taskhome.app.config['TESTING'] = True
-    with taskhome.app.test_client() as client:
+    app.config['TESTING'] = True
+    with app.test_client() as client:
         client.post('/settings', data={'clear_history': '1'})
 
-    assert taskhome.history is held
+    assert taskhome.state.history is held
     assert held == []

@@ -1,24 +1,30 @@
 """Shared test fixtures.
 
-Two things must be true before `app` is imported: it must not read the user's
-real JSON data files, and it must not start the scheduler thread (which prints
-to a physical printer). `TASKHOME_NO_INIT=1` handles both, and is set here
-before the import happens.
+Two things must be true throughout: no test may touch the user's real JSON
+files, and no test may reach the physical printer. Both have gone wrong for
+real during development -- a live tasks.json was overwritten, and a stray code
+path emitted an actual receipt -- so both are enforced by autouse fixtures
+rather than left to each test's discipline.
+
+Importing the taskhome package is now inert: it reads no files, starts no
+thread and touches no hardware. That is the point of the app factory (P0-12),
+and it is why these fixtures can be this simple.
 """
-import os
 import sys
 from pathlib import Path
 
-os.environ['TASKHOME_NO_INIT'] = '1'
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 
-import app as taskhome  # noqa: E402
+import taskhome  # noqa: E402
+from taskhome import printing, state, storage  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_STATE_FILES = [REPO_ROOT / name for name in
                     ('config.json', 'tasks.json', 'history.json', 'listeners.json')]
+REAL_DATA_FILES = [REPO_ROOT / 'data' / name for name in
+                   ('config.json', 'tasks.json', 'history.json', 'listeners.json')]
 
 
 class RealPrinterReached(AssertionError):
@@ -26,19 +32,34 @@ class RealPrinterReached(AssertionError):
 
 
 @pytest.fixture(autouse=True)
+def never_touch_real_data():
+    """Fail loudly if a test modifies the user's live JSON files.
+
+    A backstop, not a nicety: a real tasks.json was destroyed during
+    development by running code that wrote to the repo root.
+    """
+    watched = REAL_STATE_FILES + REAL_DATA_FILES
+
+    def snapshot():
+        return {p: (p.read_bytes() if p.exists() else None) for p in watched}
+
+    before = snapshot()
+    yield
+    after = snapshot()
+    changed = [p.name for p in watched if before[p] != after[p]]
+    assert not changed, (
+        f"test modified real data files: {changed}. "
+        f"Point constants.DATA_DIR at tmp_path instead.")
+
+
+@pytest.fixture(autouse=True)
 def no_physical_printing(monkeypatch):
     """Make the real printer unreachable from every test, always.
 
-    This is not paranoia. A test that patched print_scf_issue but not
-    print_scf_notice, combined with is_printer_connected() being patched to
-    True, opened the real USB device and emitted an actual receipt on the
-    user's newly connected printer.
-
     Patching individual print functions per test is the wrong layer: any code
-    path that reaches escpos.printer.Usb prints, and it is easy to add one
-    without noticing. So the device constructor itself is replaced. Tests that
-    want to observe print behaviour patch the higher-level functions on top of
-    this; tests that do not simply cannot reach hardware.
+    path reaching escpos Usb() prints, and it is easy to add one without
+    noticing -- which is exactly how a test once emitted a real receipt.
+    Replacing the device constructor covers all of them.
     """
     attempts = []
 
@@ -49,58 +70,30 @@ def no_physical_printing(monkeypatch):
             "Patch the print_* function you are exercising, or use the "
             "fake_printer fixture in tests/test_printing.py.")
 
-    monkeypatch.setattr(taskhome, 'Usb', forbidden)
-    # usb.core.find backs is_printer_connected(); default to "absent" so any
-    # unpatched probe reports no printer rather than trying to use one.
-    monkeypatch.setattr(taskhome.usb.core, 'find', lambda *a, **k: None)
+    monkeypatch.setattr(printing, 'Usb', forbidden)
+    monkeypatch.setattr(printing.usb.core, 'find', lambda *a, **k: None)
 
     yield
 
     # Raising is not enough on its own: the print functions catch broad
     # exceptions and return False, so a blocked attempt would be swallowed and
-    # the test would still pass -- hiding the fact that it would have printed
-    # on real hardware. Fail the test explicitly.
+    # the test would pass while hiding that it would have printed.
     assert not attempts, (
         "this test reached escpos Usb(); on a machine with the printer "
         "connected it would have emitted real paper.")
 
 
-@pytest.fixture(autouse=True)
-def never_touch_real_data():
-    """Fail loudly if any test modifies the user's live JSON files.
-
-    This is a backstop, not a nicety: a real tasks.json was destroyed during
-    development by running code that wrote to the repo root. Tests are the most
-    likely place for that to happen again, so the suite checks itself.
-    """
-    def snapshot():
-        return {p: (p.read_bytes() if p.exists() else None) for p in REAL_STATE_FILES}
-
-    before = snapshot()
-    yield
-    after = snapshot()
-    changed = [p.name for p in REAL_STATE_FILES if before[p] != after[p]]
-    assert not changed, (
-        f"test modified real data files: {changed}. "
-        f"Point DATA_DIR/APP_ROOT at tmp_path instead.")
-
-
 class PrintLog(list):
-    """Records what would have been printed, and can simulate an offline
-    printer by setting `.online = False` (used to test P0-4).
-
-    Subclasses list so tests can assert on it directly.
-    """
+    """Records what would have been printed. Set `.online = False` to simulate
+    a disconnected printer (P0-4)."""
     online = True
 
 
 @pytest.fixture
 def clean_state(monkeypatch):
-    """Isolate module-level globals and neuter every path that writes to disk
-    or to the printer. Yields a PrintLog of what *would* have been printed.
+    """Isolate module state and neuter every path that writes or prints.
 
-    This is a minimal stand-in for the fake printer backend in MASTER_PLAN
-    P1-4 — it proves the scheduler logic without hardware.
+    Yields a PrintLog of what would have been printed.
     """
     printed = PrintLog()
 
@@ -110,20 +103,26 @@ def clean_state(monkeypatch):
         printed.append(task)
         return True
 
-    monkeypatch.setattr(taskhome, 'tasks', [])
-    monkeypatch.setattr(taskhome, 'history', [])
-    monkeypatch.setattr(taskhome, 'listeners', {})
-    monkeypatch.setattr(taskhome, 'config', {
+    monkeypatch.setattr(state, 'tasks', [])
+    monkeypatch.setattr(state, 'history', [])
+    monkeypatch.setattr(state, 'listeners', {})
+    monkeypatch.setattr(state, 'config', {
         'max_history': 500, 'hostname': 'localhost', 'theme': 'system',
     })
-    monkeypatch.setattr(taskhome, 'save_tasks', lambda: None)
-    monkeypatch.setattr(taskhome, 'save_history', lambda: None)
-    monkeypatch.setattr(taskhome, 'save_config', lambda: None)
-    monkeypatch.setattr(taskhome, 'save_listeners', lambda: None)
-    monkeypatch.setattr(taskhome, 'print_task', fake_print)
-    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: printed.online)
+    for name in ('save_tasks', 'save_history', 'save_config', 'save_listeners'):
+        monkeypatch.setattr(storage, name, lambda: True)
+    monkeypatch.setattr(printing, 'print_task', fake_print)
+    monkeypatch.setattr(printing, 'is_printer_connected', lambda: printed.online)
 
     yield printed
+
+
+@pytest.fixture
+def app():
+    """A Flask app with no data loaded and no scheduler thread."""
+    application = taskhome.create_app(load=False, with_scheduler=False)
+    application.config['TESTING'] = True
+    return application
 
 
 @pytest.fixture

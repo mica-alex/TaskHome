@@ -8,7 +8,7 @@
         <h2>Settings</h2>
         <div class="card">
             <div class="card-content">
-                <form action="{{ url_for('settings') }}" method="post">
+                <form action="{{ url_for('main.settings') }}" method="post">
                     <div class="input-field">
                         <input id="max_history" name="max_history" type="number" min="1" step="1" pattern="[0-9]*" value="{{ config.max_history }}" required aria-required="true">
                         <label for="max_history">Max History</label>
@@ -98,8 +98,8 @@
                 });
             }
 
-            wireTestPrint('test-task-print-btn', '{{ url_for("test_print") }}', 'Test task print');
-            wireTestPrint('test-scf-print-btn', '{{ url_for("test_scf_print") }}', 'Test SCF print');
+            wireTestPrint('test-task-print-btn', '{{ url_for("main.test_print") }}', 'Test task print');
+            wireTestPrint('test-scf-print-btn', '{{ url_for("main.test_scf_print") }}', 'Test SCF print');
         });
     </script>
 </div>

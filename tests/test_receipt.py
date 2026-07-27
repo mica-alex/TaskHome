@@ -7,8 +7,8 @@ and that both renderers consume the same input.
 """
 import pytest
 
-import layouts
-import receipt as r
+from taskhome import layouts
+from taskhome import receipt as r
 
 
 # --- column model -------------------------------------------------------------

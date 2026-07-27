@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-TEMPLATES = REPO / 'templates'
-VENDOR = REPO / 'static' / 'vendor'
+TEMPLATES = REPO / 'taskhome' / 'templates'
+VENDOR = REPO / 'taskhome' / 'static' / 'vendor'
 
 REMOTE_HOSTS = ('cdnjs.', 'jsdelivr.', 'fonts.googleapis.com', 'fonts.gstatic.com',
                 'unpkg.com', 'ajax.googleapis.com')
@@ -64,7 +64,7 @@ def test_native_selects_stay_visible_without_materialize():
     """The bug: an unconditional `select { display: none }` hid every dropdown
     when Materialize didn't load. Hiding must be scoped to selects Materialize
     has actually wrapped."""
-    css = (REPO / 'static' / 'styles.css').read_text()
+    css = (REPO / 'taskhome' / 'static' / 'styles.css').read_text()
     for match in re.finditer(r'([^{}]*)\{([^}]*)\}', css):
         selector, body = match.group(1).strip(), match.group(2)
         if 'display' not in body or 'none' not in body:

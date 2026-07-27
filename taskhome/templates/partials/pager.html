@@ -6,7 +6,7 @@
   shareable, which a JS-only pager would not be.
 #}
 {% macro history_url(page_num, per=None) -%}
-{{ url_for('task_page', page=page_num, per_page=per or page.per_page,
+{{ url_for('main.task_page', page=page_num, per_page=per or page.per_page,
            q=query or None, type=kind or None) }}
 {%- endmacro %}
 

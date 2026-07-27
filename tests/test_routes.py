@@ -5,13 +5,13 @@ task with an unusual status would take down the whole page.
 """
 import pytest
 
-import app as taskhome
+import taskhome
 
 
 @pytest.fixture
-def client(clean_state):
-    taskhome.app.config['TESTING'] = True
-    with taskhome.app.test_client() as c:
+def client(app, clean_state):
+    app.config['TESTING'] = True
+    with app.test_client() as c:
         yield c
 
 
@@ -24,7 +24,7 @@ def test_pages_render_when_empty(client, route):
 def test_pages_render_every_task_state(client, clean_state, make_task, route):
     """All four states must render, including the ones only the scheduler
     creates (missed, schedule_error)."""
-    taskhome.tasks.extend([
+    taskhome.state.tasks.extend([
         make_task('2026-04-01T09:00:00', 'daily'),
         make_task('2026-04-01T09:00:00', 'daily', enabled=False),
         make_task('2026-03-01T09:00:00', 'none',
@@ -43,20 +43,20 @@ def test_pages_render_every_task_state(client, clean_state, make_task, route):
 def test_disabled_tasks_are_visible(client, clean_state, make_task):
     """P0-13: a disabled task used to disappear entirely, making a missed
     one-off unrecoverable from the UI."""
-    taskhome.tasks.append(
+    taskhome.state.tasks.append(
         make_task('2026-03-01T09:00:00', 'none', title='Vanishing Act', enabled=False))
     assert 'Vanishing Act' in client.get('/task_page').get_data(as_text=True)
 
 
 def test_schedule_error_detail_is_shown(client, clean_state, make_task):
-    taskhome.tasks.append(make_task(
+    taskhome.state.tasks.append(make_task(
         '2026-03-01T09:00:00', 'custom', days=[], enabled=False,
         schedule_error='recurrence did not advance from 2026-03-01T09:00:00'))
     assert 'did not advance' in client.get('/task_page').get_data(as_text=True)
 
 
 def test_task_titles_are_escaped(client, clean_state, make_task):
-    taskhome.tasks.append(make_task(
+    taskhome.state.tasks.append(make_task(
         '2026-04-01T09:00:00', 'daily', title='<script>alert(1)</script>'))
     body = client.get('/task_page').get_data(as_text=True)
     assert '<script>alert(1)</script>' not in body
@@ -67,31 +67,31 @@ def test_task_titles_are_escaped(client, clean_state, make_task):
 def test_test_print_disconnected_is_not_a_success(client, clean_state, monkeypatch, route):
     """The front end trusts the status code, so 'Printer not connected' must
     not come back as 200 or it renders as a success toast."""
-    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: False)
+    monkeypatch.setattr(taskhome.printing, 'is_printer_connected', lambda: False)
     assert client.post(route).status_code == 503
 
 
 def test_test_print_reports_failure_honestly(client, clean_state, monkeypatch):
     """P0-10: this used to return 'Test print successful!' even when nothing
     printed, because print_task swallowed its own exceptions."""
-    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: True)
-    monkeypatch.setattr(taskhome, 'print_task', lambda task: False)
+    monkeypatch.setattr(taskhome.printing, 'is_printer_connected', lambda: True)
+    monkeypatch.setattr(taskhome.printing, 'print_task', lambda task: False)
     resp = client.post('/test_print')
     assert resp.status_code == 500
     assert 'failed' in resp.get_data(as_text=True)
 
 
 def test_test_print_reports_success(client, clean_state, monkeypatch):
-    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: True)
-    monkeypatch.setattr(taskhome, 'print_task', lambda task: True)
+    monkeypatch.setattr(taskhome.printing, 'is_printer_connected', lambda: True)
+    monkeypatch.setattr(taskhome.printing, 'print_task', lambda task: True)
     resp = client.post('/test_print')
     assert resp.status_code == 200
     assert 'successful' in resp.get_data(as_text=True)
 
 
 def test_test_scf_print_reports_failure_honestly(client, clean_state, monkeypatch):
-    monkeypatch.setattr(taskhome, 'is_printer_connected', lambda: True)
-    monkeypatch.setattr(taskhome, 'print_scf_issue', lambda issue: False)
+    monkeypatch.setattr(taskhome.printing, 'is_printer_connected', lambda: True)
+    monkeypatch.setattr(taskhome.printing, 'print_scf_issue', lambda issue: False)
     assert client.post('/test_scf_print').status_code == 500
 
 

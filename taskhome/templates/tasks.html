@@ -46,7 +46,7 @@
             <span class="card-title">Print History</span>
 
             {# Search and filter submit as GET so every view is bookmarkable. #}
-            <form class="history-filter" method="GET" action="{{ url_for('task_page') }}">
+            <form class="history-filter" method="GET" action="{{ url_for('main.task_page') }}">
                 <input type="search" name="q" value="{{ query }}"
                        placeholder="Search title, address, description&hellip;"
                        aria-label="Search history">
@@ -58,7 +58,7 @@
                 <input type="hidden" name="per_page" value="{{ page.per_page }}">
                 <button type="submit" class="btn-small">Search</button>
                 {% if query or kind %}
-                    <a class="btn-flat btn-small" href="{{ url_for('task_page') }}">Clear</a>
+                    <a class="btn-flat btn-small" href="{{ url_for('main.task_page') }}">Clear</a>
                 {% endif %}
             </form>
 
@@ -107,7 +107,7 @@
     <div id="add-task" class="modal">
         <div class="modal-content">
             <h4>Add Task</h4>
-            <form action="{{ url_for('add_task') }}" method="POST">
+            <form action="{{ url_for('main.add_task') }}" method="POST">
                 <div class="input-field">
                     <input id="title" type="text" name="title" required>
                     <label for="title">Title</label>
@@ -163,7 +163,7 @@
     <div id="edit-task-{{ task.id }}" class="modal">
         <div class="modal-content">
             <h4>Edit Task</h4>
-            <form action="{{ url_for('edit_task', task_id=task.id) }}" method="POST">
+            <form action="{{ url_for('main.edit_task', task_id=task.id) }}" method="POST">
                 <div class="input-field">
                     <input id="title_{{ task.id }}" type="text" name="title" value="{{ task.title }}" required>
                     <label for="title_{{ task.id }}">Title</label>

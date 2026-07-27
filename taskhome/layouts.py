@@ -11,7 +11,7 @@ measured height difference instead of an assertion.
 """
 from datetime import datetime
 
-import receipt as r
+from . import receipt as r
 
 
 def _stamp(when=None):
