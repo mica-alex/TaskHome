@@ -65,7 +65,12 @@ PRINTER_MANUFACTURER = 'Epson'
 PRINTER_MODEL = 'TM-T20III'
 PRINTER_CONNECTION = 'USB'
 
-DEFAULT_CONFIG = {'max_history': 500, 'hostname': 'localhost', 'theme': 'system'}
+#: Bumped when a cached asset changes shape; the service worker keys its
+#: cache on this, so a stale offline shell is discarded on the next load.
+VERSION = '2.0.0'
+
+DEFAULT_CONFIG = {'max_history': 500, 'hostname': 'localhost', 'theme': 'system',
+                  'app_name': 'TaskHome'}
 
 
 

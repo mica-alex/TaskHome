@@ -803,3 +803,69 @@ tr.task-inactive td { opacity: 0.6; }
 
 /* A field hidden by depends_on must not leave a gap behind it. */
 .mica-field[data-depends-on][hidden] { display: none; }
+
+/* --- Installed web app and touch (P2B-4/P2B-6) -------------------------- */
+
+/*
+ * viewport-fit=cover puts the page under the notch and the home indicator, so
+ * the insets have to be paid back explicitly. env() resolves to 0px on every
+ * browser that has no notch, so this is unconditional rather than gated.
+ */
+body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}
+.mica-appbar { margin-top: calc(28px + env(safe-area-inset-top)); }
+.mica-container { padding-bottom: calc(var(--mica-space-8) + env(safe-area-inset-bottom)); }
+
+@media (pointer: coarse) {
+    /*
+     * 44px is Apple's minimum target and roughly Google's 48dp. The desktop
+     * control height is 40px, which is fine with a mouse and misses with a
+     * thumb -- so this is scoped to coarse pointers rather than to a width
+     * breakpoint, since a touchscreen laptop is still a touchscreen.
+     */
+    :root { --mica-control-height: 44px; }
+
+    .mica-btn, .mica-input, .mica-field select, .mica-field input { min-height: 44px; }
+
+    /* The chip close button was a 14px glyph; on a phone that is a coin toss. */
+    .chip-remove { min-width: 32px; min-height: 32px; display: inline-grid; place-items: center; }
+
+    .mica-nav a { padding: 12px 14px; }
+
+    /* iOS zooms the page when a focused input is under 16px, and never zooms
+     * back out. Every text-entry control therefore has to be at least 16px. */
+    input, select, textarea { font-size: 16px; }
+
+    .matrix-table input[type="checkbox"] { width: 24px; height: 24px; }
+    .matrix-table td { padding: 10px; }
+
+    /* Hover styling sticks after a tap on touch devices, leaving a row looking
+     * selected when it is not. */
+    .mica-table tbody tr:hover { background-color: transparent; }
+    .listener-card:hover { transform: none; }
+}
+
+/* Standalone mode: there is no browser chrome to fall back on, so an
+ * accidental text selection while scrolling a table is unrecoverable without a
+ * refresh. Selection stays on for content, off for controls. */
+@media (display-mode: standalone) {
+    .mica-appbar, .mica-nav, .matrix-table th, .status-badges {
+        -webkit-user-select: none; user-select: none;
+    }
+    /* Overscroll bounce reveals the page background behind the app, which
+     * reads as a rendering glitch when there is no browser chrome. */
+    body { overscroll-behavior-y: none; }
+}
+
+/* Respect a reduced-motion preference everywhere at once, rather than
+ * remembering to at each new transition. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

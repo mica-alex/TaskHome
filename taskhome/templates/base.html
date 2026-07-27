@@ -10,8 +10,38 @@
 <html lang="en" data-theme-mode="{{ config.theme }}" data-theme="{{ config.theme }}">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{% endblock %} - TaskHome</title>
+    {#
+      viewport-fit=cover lets the page reach under the notch and the home
+      indicator; the safe-area insets in mica.css keep content out from under
+      them. Without cover, an installed iOS app gets letterboxed with white
+      bars that no theme setting can reach.
+    #}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% block title %}{% endblock %} - {{ config.app_name or 'TaskHome' }}</title>
+
+    {#
+      Installable web app (P2B). The iOS half works over plain HTTP, which is
+      all this LAN appliance speaks -- see web/pwa.py for what does not and why.
+    #}
+    <link rel="manifest" href="{{ url_for('pwa.manifest') }}">
+    <meta name="theme-color" content="{{ pwa_theme_light }}" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="{{ pwa_theme_dark }}" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    {# black-translucent, so the status bar takes the page background rather
+       than sitting in a fixed black strip above it. #}
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{ config.app_name or 'TaskHome' }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+    <link rel="icon" href="{{ url_for('static', filename='icons/favicon.ico') }}" sizes="any">
+    <link rel="icon" type="image/png" sizes="192x192"
+          href="{{ url_for('static', filename='icons/icon-192.png') }}">
+
+    {# A phone number is not a thing on any page here, and iOS turning task
+       titles containing digits into call links is a real annoyance. #}
+    <meta name="format-detection" content="telephone=no">
 
     {#
       Everything is vendored: this is a LAN appliance and must work with no
@@ -135,6 +165,22 @@
     <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
     <script src="{{ url_for('static', filename='ui.js') }}"></script>
+    <script>
+        /*
+         * Register the offline shell, but only where it can actually work.
+         * navigator.serviceWorker is undefined outside a secure context, so
+         * over http://server.local this is a no-op and the app runs normally.
+         * The moment HTTPS lands, offline support starts working with no
+         * further change here.
+         */
+        if ('serviceWorker' in navigator && window.isSecureContext) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker
+                    .register('{{ url_for("pwa.service_worker") }}')
+                    .catch(function (e) { console.warn('Service worker not registered:', e); });
+            });
+        }
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
