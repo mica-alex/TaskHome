@@ -97,6 +97,36 @@ receipt.render_escpos(blocks, printer)  # the same blocks, on paper
 Block types: `text` (font, width/height multipliers, bold, align, optional
 density and leading), `qr`, `barcode`, `rule`, `blank`, `gap` (sub-line space).
 
+A template may also hold a `list` block, which the renderer never sees:
+`styles.fill()` expands it into `text` and `qr` blocks, one group per row of a
+repeating source (`LIST_PLACEHOLDERS` in `docs/listeners.md`). It exists for
+the one shape a flat template cannot express — a news digest whose length is
+only known at print time, where each headline carries its own QR.
+
+### QR codes and their links
+
+A QR is only worth its 20-odd millimetres if the link works.
+
+- **`fill()` tidies prose, not payloads.** `tidy_separators()` collapses
+  separators stranded by an empty placeholder, and `/` is one of them — so it
+  rewrote the `//` in `https://seeclickfix.com/issues/1` to ` / `, and every
+  QR on every receipt encoded `https: / seeclickfix.com/...`, which a phone
+  percent-encodes to `https:%20/%20…` and refuses to open. `qr` and `barcode`
+  values now skip tidying entirely, and URLs inside prose are held out of it.
+- **A QR with no link is dropped, not printed empty.** An NWS alert whose ZIP
+  did not resolve, a parcel with no number, an MQTT message with no `url`: the
+  block resolves to nothing and `fill()` removes it.
+- **Where each one points**: a task links back to its own page in the app; an
+  SCF issue to `html_url`; GitHub, webhook and MQTT to whatever URL the item
+  carried; a parcel to `t.17track.net`, which is carrier-neutral on purpose; a
+  chore chart to its mark-done token URL; a news headline to the article. NWS
+  is the odd one — the API has no human-facing page per alert, so the QR points
+  at the `forecast.weather.gov` page for the alerted ZIP, which lists the
+  active alerts in full.
+- **The short layouts carry no QR.** `nws-compact`, `nws-minimal`,
+  `github-compact`, `packages-compact`, `mqtt-plain`, `webhook-plain` and
+  `feeds-plain` exist to keep a routine item from costing a hand of paper.
+
 ### Current defaults
 
 ```

@@ -13,6 +13,8 @@
 
   var KIND = new URLSearchParams(location.search).get('kind') || 'task';
   var template = JSON.parse(document.getElementById('template-data').textContent);
+  var LIST_SOURCES = JSON.parse(document.getElementById('list-sources').textContent);
+  var SOURCE_NAMES = Object.keys(LIST_SOURCES);
   var blocksEl = document.getElementById('blocks');
   var previewEl = document.getElementById('preview-body');
   var metaEl = document.getElementById('preview-meta');
@@ -34,7 +36,25 @@
               {key: 'height', label: 'Height', type: 'number', min: 10, max: 200}],
     rule: [{key: 'char', label: 'Character', type: 'text'}],
     gap: [{key: 'dots', label: 'Dots', type: 'number', min: 1, max: 100}],
-    blank: [{key: 'count', label: 'Lines', type: 'number', min: 1, max: 5}]
+    blank: [{key: 'count', label: 'Lines', type: 'number', min: 1, max: 5}],
+    /*
+     * A list block prints its fields once per item of a repeating source -- a
+     * digest's entries, say. The server expands it into ordinary text and qr
+     * blocks at fill time, so the preview below is still the real renderer.
+     */
+    list: [
+      {key: 'source', label: 'Repeat over', type: 'select',
+       options: SOURCE_NAMES.map(function (name) { return [name, name]; })},
+      {key: 'value', label: 'Text per item', type: 'text', wide: true},
+      {key: 'qr_value', label: 'QR per item (blank for none)', type: 'text', wide: true},
+      {key: 'font', label: 'Font', type: 'select', options: [['b', 'Small (64 cols)'], ['a', 'Large (48 cols)']]},
+      {key: 'width', label: 'Width', type: 'number', min: 1, max: 4},
+      {key: 'height', label: 'Height', type: 'number', min: 1, max: 4},
+      {key: 'align', label: 'Align', type: 'select', options: [['left', 'Left'], ['center', 'Center'], ['right', 'Right']]},
+      {key: 'bold', label: 'Bold', type: 'checkbox'},
+      {key: 'size', label: 'QR size', type: 'number', min: 1, max: 10},
+      {key: 'gap', label: 'Space between items', type: 'number', min: 0, max: 100}
+    ]
   };
 
   var DEFAULTS = {
@@ -43,8 +63,30 @@
     barcode: {type: 'barcode', value: '{id}', height: 60},
     rule: {type: 'rule', char: '-'},
     gap: {type: 'gap', dots: 8},
-    blank: {type: 'blank', count: 1}
+    blank: {type: 'blank', count: 1},
+    list: listDefault()
   };
+
+  /* A new list block, guessing sensible fields from the item placeholders the
+   * source offers -- an empty one previews as nothing at all, which reads as a
+   * broken button. */
+  function listDefault() {
+    var source = SOURCE_NAMES[0];
+    if (!source) return {type: 'list'};
+    var names = LIST_SOURCES[source] || [];
+    function first(re) {
+      return names.filter(function (n) { return re.test(n); })[0] || '';
+    }
+    var label = first(/title|name|label|text/) || names[0] || '';
+    var link = first(/link|url/);
+    return {
+      type: 'list', source: source,
+      value: label ? '{' + label + '}' : '',
+      qr_value: link ? '{' + link + '}' : '',
+      font: 'b', width: 1, height: 1, align: 'left', bold: false,
+      size: 3, gap: 8
+    };
+  }
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -81,12 +123,14 @@
     input.className = 'mica-input';
     input.addEventListener('input', function () {
       block[spec.key] = spec.type === 'checkbox' ? input.checked
-        : spec.type === 'number' ? parseInt(input.value, 10) || 1
+        // `|| 1` for a field whose floor is 1; a field that allows 0 has to
+        // keep it, or "no space between items" silently becomes one dot.
+        : spec.type === 'number' ? (parseInt(input.value, 10) || (spec.min === 0 ? 0 : 1))
         : input.value;
       schedulePreview();
     });
     input.addEventListener('change', schedulePreview);
-    if (spec.key === 'value') {
+    if (spec.key === 'value' || spec.key === 'qr_value') {
       input.addEventListener('focus', function () { lastFocused = input; });
     }
     wrap.appendChild(input);

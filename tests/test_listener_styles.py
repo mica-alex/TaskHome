@@ -15,6 +15,10 @@ from taskhome.listeners import base, nws
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(constants, 'DATA_DIR', str(tmp_path))
+    # CONFIG_FILE too, and not only for tidiness: it is resolved at import
+    # against the real DATA_DIR, so a test that activates a template writes
+    # into the live data directory with DATA_DIR alone redirected.
+    monkeypatch.setattr(constants, 'CONFIG_FILE', str(tmp_path / 'config.json'))
     monkeypatch.setattr(state, 'config', {'theme': 'system'})
     app = create_app(load=False, with_scheduler=False)
     app.config['TESTING'] = True
@@ -65,12 +69,50 @@ def test_presets_use_placeholders_not_baked_in_values():
 
 
 def test_every_placeholder_a_preset_uses_is_declared():
-    """An undeclared placeholder renders as literal text on paper."""
-    for name, listener in base.registry().items():
+    """An undeclared placeholder renders as literal text on paper.
+
+    Checked through validate_template rather than a set comparison, because
+    item placeholders are legal inside a `list` block and nowhere else --
+    {item_title} in an ordinary text block has nothing to resolve against and
+    must still be refused.
+    """
+    for name in base.registry():
         for preset in styles.builtin_templates(name):
-            used = set(styles._PLACEHOLDER_RE.findall(json.dumps(preset['blocks'])))
-            assert used <= set(listener.PLACEHOLDERS), \
-                f'{preset["name"]} uses {used - set(listener.PLACEHOLDERS)}'
+            styles.validate_template(preset)
+
+
+def test_the_studio_offers_the_digest_its_repeating_source(client):
+    """The + List button and the {item_*} chips only appear where there is
+    something to repeat over."""
+    body = client.get('/settings/receipts?kind=feeds').get_data(as_text=True)
+    assert 'data-add="list"' in body
+    assert 'data-placeholder="item_title"' in body
+
+    plain = client.get('/settings/receipts?kind=task').get_data(as_text=True)
+    assert 'data-add="list"' not in plain
+
+
+def test_a_list_template_round_trips_through_the_studio(client):
+    """Saved, re-read and previewed -- the path a user actually takes."""
+    template = styles.get_template('feeds', 'feeds-default')
+    template['name'] = 'digest-with-links'
+    template['builtin'] = False        # what the Studio does on save
+    saved = client.post('/api/receipt/templates/feeds',
+                        json={'template': template, 'activate': True})
+    assert saved.status_code == 200 and saved.get_json()['ok']
+
+    preview = client.post('/api/receipt/preview', json={'template': template})
+    rows = preview.get_json()['rows']
+    assert sum(1 for row in rows if row['kind'] == 'qr') == len(
+        styles.list_sources('feeds')['entries'])
+
+
+def test_an_item_placeholder_outside_a_list_block_is_refused():
+    """It would resolve to nothing on every receipt, silently."""
+    with pytest.raises(styles.TemplateError):
+        styles.validate_template({
+            'name': 'strays', 'kind': 'feeds',
+            'blocks': [{'type': 'text', 'value': '{item_title}'}]})
 
 
 def test_presets_are_generated_from_the_printing_code():

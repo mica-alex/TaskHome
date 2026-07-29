@@ -30,6 +30,9 @@ from ..logsetup import log
 ZIP_URL = 'https://api.zippopotam.us/us/{zip}'
 POINTS_URL = 'https://api.weather.gov/points/{lat},{lng}'
 ALERTS_URL = 'https://api.weather.gov/alerts/active'
+#: The one human-readable page in this API's orbit -- it redirects to the point
+#: forecast for a ZIP, with any active alerts listed at the top. See alert_url.
+FORECAST_URL = 'https://forecast.weather.gov/zipcity.php'
 
 #: The API asks for a contactable User-Agent and rate-limits anonymous use.
 USER_AGENT = '(TaskHome receipt printer, https://github.com/mica-alex/TaskHome)'
@@ -257,6 +260,7 @@ class NWSListener(base.Listener):
         'instruction': 'Move to an interior room on the lowest floor.',
         'description': 'At 1041 AM, a severe thunderstorm was located near Manchester.',
         'zip': '03101',
+        'url': 'https://forecast.weather.gov/zipcity.php?inputstring=03101',
         'printed': '10:41 AM 7/27/26',
     }
 
@@ -403,6 +407,24 @@ class NWSListener(base.Listener):
 
     # --- receipts ------------------------------------------------------------
 
+    def alert_url(self, alert):
+        """Where the QR points: the local forecast page for the first ZIP.
+
+        The API gives no human-facing page for an alert. `@id` is the alert
+        itself but serves raw JSON, and `web` is only www.weather.gov. The
+        zipcity page redirects to the point forecast, which lists the active
+        alerts in full at the top -- so scanning it answers both "what is this"
+        and "is it still going", which the JSON does not.
+
+        Empty when no ZIP resolved, and fill() then drops the QR block rather
+        than printing a symbol that leads nowhere.
+        """
+        zips = sorted({z['zip'] for z in (alert.get('_zones') or {}).values()
+                       if z.get('zip')})
+        if not zips:
+            return ''
+        return f'{FORECAST_URL}?inputstring={zips[0]}'
+
     def context(self, alert):
         return {
             'event': alert.get('event', 'Weather Alert'),
@@ -416,10 +438,11 @@ class NWSListener(base.Listener):
             'instruction': (alert.get('instruction') or '').strip(),
             'description': (alert.get('description') or '').strip(),
             'zip': ', '.join(sorted({z['zip'] for z in (alert.get('_zones') or {}).values()})),
+            'url': self.alert_url(alert),
             'printed': layouts._stamp(),
         }
 
-    def blocks_from_context(self, context, big_title=True, description=True):
+    def blocks_from_context(self, context, big_title=True, description=True, qr=True):
         """The layout, over already-resolved values.
 
         Split out from receipt_blocks so the Studio presets and the printed
@@ -430,9 +453,10 @@ class NWSListener(base.Listener):
         `context` may hold real values or `{placeholder}` markers; the layout
         does not care, which is what makes one function serve both.
 
-        Title size and description are separate knobs. They used to be one
-        "loud" flag, which meant a wind advisory could not have a readable
-        headline without also printing 600 characters of forecast discussion.
+        Title size, description and QR are separate knobs. Size and description
+        used to be one "loud" flag, which meant a wind advisory could not have a
+        readable headline without also printing 600 characters of forecast
+        discussion.
         """
         blocks = [
             receipt.text(context['event'], font='a',
@@ -452,6 +476,16 @@ class NWSListener(base.Listener):
             blocks.append(receipt.text(str(context['description'])[:600],
                                        font='b', align='left'))
         blocks.append(receipt.rule())
+        if qr and context.get('url'):
+            # At the foot rather than the head, unlike a task or an issue: the
+            # event name has to be the first thing on the paper when this is
+            # read from across the room. The QR is the follow-up, not the
+            # identity of the receipt.
+            #
+            # Unlabelled, and guarded on the url: an alert whose ZIP did not
+            # resolve has nowhere to point, and a "Scan for the forecast" line
+            # over no QR would be worse than no line at all.
+            blocks.append(receipt.qr(context['url'], size=4))
         blocks.append(receipt.text(f"NWS - Printed {context['printed']}", font='b'))
         return blocks
 
@@ -513,11 +547,16 @@ class NWSListener(base.Listener):
         markers = {key: '{%s}' % key for key in self.PLACEHOLDERS}
         return [
             (f'{self.name}-default',
-             self.blocks_from_context(markers, big_title=True, description=True)),
+             self.blocks_from_context(markers, big_title=True, description=True,
+                                      qr=True)),
+            # No QR on the shorter two. They exist to keep a wind advisory from
+            # costing a hand of paper, and a QR is another 25mm of it.
             (f'{self.name}-compact',
-             self.blocks_from_context(markers, big_title=True, description=False)),
+             self.blocks_from_context(markers, big_title=True, description=False,
+                                      qr=False)),
             (f'{self.name}-minimal',
-             self.blocks_from_context(markers, big_title=False, description=False)),
+             self.blocks_from_context(markers, big_title=False, description=False,
+                                      qr=False)),
         ]
 
     def template_name(self, config, alert):
@@ -546,6 +585,9 @@ class NWSListener(base.Listener):
             'description': context['description'][:500],
             'status': alert.get('messageType', 'Alert'),
             'reported_at': alert.get('effective', ''),
+            # Carried so a reprint points at the same forecast page. Without it
+            # the reprint falls back to the Studio's sample ZIP.
+            'url': context['url'],
             'print_time': datetime.now().isoformat(),
         }
 

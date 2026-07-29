@@ -161,6 +161,20 @@ class FeedListener(base.Listener):
         'printed': '8:30 AM 7/27/26',
     }
 
+    #: Rows for a `list` block, which is how the digest gets one QR per entry:
+    #: the count varies per digest, so it cannot be a fixed run of blocks.
+    #: These samples are what the Studio previews against.
+    LIST_PLACEHOLDERS = {
+        'entries': [
+            {'item_index': '1', 'item_title': 'Something happened today',
+             'item_source': 'The Guardian',
+             'item_link': 'https://www.theguardian.com/world/2026/jul/27/something'},
+            {'item_index': '2', 'item_title': 'A release you follow shipped 4.2',
+             'item_source': 'GitHub',
+             'item_link': 'https://github.com/python/cpython/releases/tag/v4.2'},
+        ],
+    }
+
     # --- polling -------------------------------------------------------------
 
     def poll(self, config, since):
@@ -294,27 +308,74 @@ class FeedListener(base.Listener):
             'count': str(len(entries)),
             'feeds': str(item.get('feeds', 0)),
             'items': '\n'.join(lines),
+            'entries': self.rows(entries),
             'printed': layouts._stamp(),
         }
 
-    def blocks_from_context(self, context):
-        return [
+    def rows(self, entries):
+        """The digest as list-block rows -- one per entry, with its link."""
+        rows = []
+        for index, entry in enumerate(entries, start=1):
+            rows.append({
+                'item_index': str(index),
+                'item_title': entry.get('title', ''),
+                'item_source': entry.get('feed') or _domain(entry.get('link', '')),
+                'item_link': entry.get('link', ''),
+            })
+        return rows
+
+    def blocks_from_context(self, context, qr=True):
+        """The digest layout. With `qr`, each headline carries its own QR.
+
+        A digest is the one receipt whose length is not known when the template
+        is written, so the entries are a `list` block rather than a run of text
+        blocks -- see styles._expand_list. The block keeps its `{item_*}`
+        markers even here, because the rows supply those at fill time whether
+        this is a Studio preset or the printed fallback.
+        """
+        blocks = [
             receipt.text('News digest', font='a', width=2, height=2, bold=True),
             receipt.gap(6),
             receipt.text(f"{context['count']} items from {context['feeds']} feed(s)",
                          font='b'),
             receipt.rule(),
-            receipt.text(context['items'], font='b', align='left'),
-            receipt.rule(),
-            receipt.text(f"Printed {context['printed']}", font='b'),
         ]
+        if qr:
+            blocks.append({'type': 'list', 'source': 'entries',
+                           'value': '{item_index}. {item_title}\n   - {item_source}',
+                           'qr_value': '{item_link}',
+                           'font': 'b', 'width': 1, 'height': 1, 'bold': False,
+                           'align': 'left', 'size': 3, 'gap': 8})
+        else:
+            blocks.append(receipt.text(context['items'], font='b', align='left'))
+        blocks.append(receipt.rule())
+        blocks.append(receipt.text(f"Printed {context['printed']}", font='b'))
+        return blocks
 
     def receipt_blocks(self, item):
-        return self.blocks_from_context(self.context(item))
+        """Fallback layout when no template is configured.
+
+        Filled rather than returned raw: the layout holds a `list` block, and
+        expanding it is styles.fill's job. Going through the same expander is
+        what stops the fallback and a Studio template disagreeing about a
+        digest with, say, no entries at all.
+        """
+        from .. import styles
+        context = self.context(item)
+        return styles.fill({'blocks': self.blocks_from_context(context)}, context)
 
     def template_presets(self):
+        """Links first, because a headline you cannot open is a dead end.
+
+        `feeds-plain` is the older layout, for anyone who would rather have a
+        short receipt than a scannable one -- ten QR codes is roughly a hand of
+        extra paper.
+        """
         markers = {key: '{%s}' % key for key in self.PLACEHOLDERS}
-        return [(f'{self.name}-default', self.blocks_from_context(markers))]
+        return [
+            (f'{self.name}-default', self.blocks_from_context(markers, qr=True)),
+            (f'{self.name}-plain', self.blocks_from_context(markers, qr=False)),
+        ]
 
     def history_record(self, item):
         entries = item.get('entries', [])
@@ -324,6 +385,11 @@ class FeedListener(base.Listener):
             'category': 'News digest',
             'title': f'News digest ({len(entries)} items)',
             'description': '; '.join(e['title'] for e in entries)[:500],
+            # Carried so a reprint rebuilds the digest that actually printed.
+            # Without them the reprint path falls back to the Studio's sample
+            # placeholders and puts invented headlines on paper.
+            'items': self.context(item)['items'],
+            'entries': self.rows(entries),
             'print_time': datetime.now().isoformat(),
         }
 

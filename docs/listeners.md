@@ -314,6 +314,17 @@ Every registered listener is an editable kind in the Receipt Studio
 - **`PLACEHOLDERS`** — the placeholder names its templates may use, with
   realistic sample values. A template using anything else is refused at save
   time rather than printing the literal `{typo}` on paper.
+- **`LIST_PLACEHOLDERS`** *(optional)* — `{source: [sample row, …]}` for a
+  receipt whose length is not known when the template is written. A digest of
+  ten headlines, each with its own QR, is ten pairs of blocks; a flat template
+  cannot say that. A `list` block repeats over one of these sources and expands
+  at fill time into ordinary `text` and `qr` blocks, so `receipt.py` never
+  learns that repetition exists and the preview stays the printed code path.
+  The sample rows are both the Studio's preview data and the definition of
+  which `{item_*}` placeholders exist, which is why they cannot disagree. Only
+  `feeds` uses one today. A listener whose fallback layout holds a `list` block
+  fills it through `styles.fill` rather than returning it raw — see
+  `FeedListener.receipt_blocks`.
 - **`template_presets()`** → `[(name, blocks)]`, default first. Blocks carry
   `{placeholder}` markers. **Generate these from the same code that prints the
   fallback layout** — a preset that has drifted from what actually prints is

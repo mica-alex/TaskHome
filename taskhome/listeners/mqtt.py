@@ -82,6 +82,7 @@ class MQTTListener(base.Listener):
         'title': 'Washing machine finished',
         'body': 'Cycle complete. Second load is in the basket.',
         'topic': 'taskhome/print/laundry',
+        'url': 'http://homeassistant.local/lovelace/laundry',
         'received': '6:42 PM 7/27/26',
     }
 
@@ -97,7 +98,8 @@ class MQTTListener(base.Listener):
 
         Accepts JSON or plain text, like the webhook: an automation that
         publishes `"Bins tonight"` should work without wrapping it in an
-        object.
+        object. `{"title": ..., "body": ..., "url": ...}` is the full shape;
+        `url` is optional and prints as a QR.
         """
         if len(payload) > MAX_PAYLOAD:
             raise ValueError(f'Payload over {MAX_PAYLOAD} bytes')
@@ -128,6 +130,9 @@ class MQTTListener(base.Listener):
             'title': title[:120],
             'body': body[:1200],
             'topic': topic,
+            # Optional, like the webhook's: an automation that knows where the
+            # thing it is reporting on lives can put a QR on the paper.
+            'url': str(data.get('url') or '').strip()[:400],
             'retained': retained,
             'received': datetime.now(timezone.utc).isoformat(),
         }
@@ -295,7 +300,8 @@ class MQTTListener(base.Listener):
                          'data:\n'
                          '  topic: taskhome/print/laundry\n'
                          '  payload: >-\n'
-                         '    {"title": "Washing machine finished"}'),
+                         '    {"title": "Washing machine finished",\n'
+                         '     "url": "http://homeassistant.local/lovelace/laundry"}'),
             }
         return {
             'title': 'Connected' if self._connected else 'Not connected',
@@ -330,13 +336,16 @@ class MQTTListener(base.Listener):
             'title': item.get('title', ''),
             'body': item.get('body', ''),
             'topic': item.get('topic', ''),
+            'url': item.get('url', ''),
             'received': layouts._stamp(),
         }
 
-    def blocks_from_context(self, context):
-        blocks = [
-            receipt.text(context['title'], font='a', width=2, height=2, bold=True),
-        ]
+    def blocks_from_context(self, context, qr=True):
+        blocks = []
+        if qr and context.get('url'):
+            blocks.append(receipt.qr(context['url'], size=4))
+        blocks.append(
+            receipt.text(context['title'], font='a', width=2, height=2, bold=True))
         if context.get('body'):
             blocks.append(receipt.gap(6))
             blocks.append(receipt.text(context['body'], font='b', align='left'))
@@ -350,7 +359,10 @@ class MQTTListener(base.Listener):
 
     def template_presets(self):
         markers = {key: '{%s}' % key for key in self.PLACEHOLDERS}
-        return [(f'{self.name}-default', self.blocks_from_context(markers))]
+        return [
+            (f'{self.name}-default', self.blocks_from_context(markers, qr=True)),
+            (f'{self.name}-plain', self.blocks_from_context(markers, qr=False)),
+        ]
 
     def history_record(self, item):
         return {
@@ -359,6 +371,7 @@ class MQTTListener(base.Listener):
             'category': item.get('topic', 'MQTT'),
             'title': item.get('title', ''),
             'description': item.get('body', '')[:500],
+            'url': item.get('url', ''),
             'reported_at': item.get('received', ''),
             'print_time': datetime.now().isoformat(),
         }

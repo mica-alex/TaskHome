@@ -96,6 +96,31 @@ def placeholders(kind):
     return dict(listener.PLACEHOLDERS) if listener is not None else {}
 
 
+def list_sources(kind):
+    """Repeating sources a kind offers, as {name: [sample row, ...]}.
+
+    A digest receipt has a variable number of entries, which a flat block list
+    cannot express: ten headlines each with their own QR is ten pairs of blocks,
+    and the template has no idea how many there will be. A `list` block covers
+    exactly that -- see _expand_list.
+
+    The sample rows are both the Studio's preview data and the definition of
+    which item placeholders exist, so the two cannot disagree.
+    """
+    from .listeners import base
+    listener = base.get(kind)
+    rows = dict(getattr(listener, 'LIST_PLACEHOLDERS', None) or {}) if listener else {}
+    return {name: [dict(row) for row in sample] for name, sample in rows.items()}
+
+
+def item_placeholders(kind, source):
+    """Placeholder names valid inside a list block over `source`."""
+    names = set()
+    for row in list_sources(kind).get(source) or []:
+        names.update(row)
+    return names
+
+
 _PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
 
 
@@ -296,9 +321,10 @@ def validate_template(template):
         raise TemplateError('A template may have at most 60 blocks.')
 
     known = set(placeholders(kind))
+    sources = list_sources(kind)
     clean = []
     for index, block in enumerate(blocks, start=1):
-        clean.append(_validate_block(block, index, known))
+        clean.append(_validate_block(block, index, known, kind, sources))
 
     return {
         'name': name,
@@ -309,14 +335,50 @@ def validate_template(template):
     }
 
 
-def _validate_block(block, index, known_placeholders):
+def _validate_block(block, index, known_placeholders, receipt_kind=None, sources=None):
     if not isinstance(block, dict):
         raise TemplateError(f'Block {index} is not an object.')
     kind = block.get('type')
-    if kind not in ('text', 'qr', 'barcode', 'rule', 'blank', 'gap', 'image'):
+    if kind not in ('text', 'qr', 'barcode', 'rule', 'blank', 'gap', 'image', 'list'):
         raise TemplateError(f'Block {index}: unknown type {kind!r}.')
 
     out = {'type': kind}
+    if kind == 'list':
+        sources = sources if sources is not None else list_sources(receipt_kind)
+        source = str(block.get('source', '') or '')
+        if source not in sources:
+            offered = ', '.join(sorted(sources)) or 'none'
+            raise TemplateError(
+                f'Block {index}: {source!r} is not a repeating source for this '
+                f'receipt (available: {offered}).')
+        out['source'] = source
+        # Item placeholders are valid here and only here, so a `{item_title}`
+        # left behind in an ordinary text block is caught rather than printing
+        # as literal braces on paper.
+        inner = set(known_placeholders) | item_placeholders(receipt_kind, source)
+        for field in ('value', 'qr_value'):
+            value = block.get(field, '')
+            if not isinstance(value, str):
+                raise TemplateError(f'Block {index}: {field} must be text.')
+            unknown = set(_PLACEHOLDER_RE.findall(value)) - inner
+            if unknown:
+                raise TemplateError(
+                    f"Block {index}: unknown placeholder(s) "
+                    f"{', '.join('{' + u + '}' for u in sorted(unknown))}.")
+            out[field] = value
+        out['font'] = block.get('font', 'b')
+        if out['font'] not in receipt.FONTS:
+            raise TemplateError(f"Block {index}: font must be 'a' or 'b'.")
+        for key, limit in (('width', 4), ('height', 4)):
+            out[key] = _bounded_int(block.get(key, 1), 1, limit, index, key)
+        out['bold'] = bool(block.get('bold'))
+        align = block.get('align', 'left')
+        if align not in ('left', 'center', 'right'):
+            raise TemplateError(f'Block {index}: align must be left, center or right.')
+        out['align'] = align
+        out['size'] = _bounded_int(block.get('size', 3), 1, 10, index, 'size')
+        out['gap'] = _bounded_int(block.get('gap', 0), 0, 100, index, 'gap')
+        return out
     if kind == 'image':
         # `src` holds a placeholder resolved at print time, so it is validated
         # like any other value rather than as a URL -- there is no URL here yet.
@@ -397,6 +459,14 @@ _DOUBLED_RE = re.compile(
     r'\s*([' + ''.join(re.escape(s) for s in _SEPARATORS) + r'])\s*'
     r'(?:[' + ''.join(re.escape(s) for s in _SEPARATORS) + r']\s*)+')
 
+#: A URL is structure, not prose. `/` is a separator above, so the `//` in
+#: `https://seeclickfix.com/issues/1` matched _DOUBLED_RE and came out as
+#: `https: / seeclickfix.com/issues/1` -- which a phone then encodes as
+#: `https:%20/%20seeclickfix.com/...` and refuses to open. Anything matching
+#: this is stashed before tidying and put back afterwards, untouched.
+_URLISH_RE = re.compile(r'\w+://\S+|\bwww\.\S+', re.IGNORECASE)
+_STASH_RE = re.compile('\x00(\\d+)\x00')
+
 
 def tidy_separators(text):
     """Remove separators left stranded by an empty placeholder.
@@ -408,13 +478,61 @@ def tidy_separators(text):
 
     Fixing it here rather than in the template keeps that simplicity and covers
     every optional field, not just this one.
+
+    URLs are held out -- see _URLISH_RE.
     """
+    stashed = []
+
+    def stash(match):
+        stashed.append(match.group(0))
+        return f'\x00{len(stashed) - 1}\x00'
+
+    text = _URLISH_RE.sub(stash, text)
     text = _DOUBLED_RE.sub(r' \1 ', text)
     previous = None
     while previous != text:
         previous = text
         text = _DANGLING_RE.sub('', text).strip()
-    return text
+    return _STASH_RE.sub(lambda m: stashed[int(m.group(1))], text)
+
+
+def _resolve(value, context):
+    return _PLACEHOLDER_RE.sub(
+        lambda m: str(context.get(m.group(1), '') or ''), value)
+
+
+def _expand_list(block, context):
+    """One `list` block -> the blocks for every row of its source.
+
+    The output is ordinary text and qr blocks, so receipt.py never learns that
+    repetition exists and the preview stays the same code path as the paper.
+    A row missing its link simply gets no QR rather than an empty symbol.
+    """
+    rows = context.get(block.get('source')) or []
+    if not isinstance(rows, (list, tuple)):
+        return []
+
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        scope = {**context, **row}
+        text = tidy_separators(_resolve(block.get('value', ''), scope).strip())
+        if text:
+            out.append({'type': 'text', 'value': text,
+                        'font': block.get('font', 'b'),
+                        'width': block.get('width', 1),
+                        'height': block.get('height', 1),
+                        'bold': block.get('bold', False),
+                        'align': block.get('align', 'left')})
+        target = _resolve(block.get('qr_value', ''), scope).strip()
+        if target:
+            out.append({'type': 'qr', 'value': target,
+                        'size': block.get('size', 3)})
+        # Only between rows: a trailing gap is paper spent on nothing.
+        if block.get('gap') and out and row is not rows[-1]:
+            out.append({'type': 'gap', 'dots': block['gap']})
+    return out
 
 
 def fill(template, context):
@@ -426,10 +544,18 @@ def fill(template, context):
     blocks = []
     for block in template.get('blocks', []):
         block = dict(block)
+        if block.get('type') == 'list':
+            blocks.extend(_expand_list(block, context))
+            continue
         if 'value' in block:
             resolved = _PLACEHOLDER_RE.sub(
                 lambda m: str(context.get(m.group(1), '') or ''), block['value'])
-            resolved = tidy_separators(resolved.strip())
+            resolved = resolved.strip()
+            # Only prose gets tidied. A QR or barcode payload is data: its
+            # separators are meaningful, and a trailing `/` on a URL is part of
+            # the URL rather than a stranded separator.
+            if block.get('type') == 'text':
+                resolved = tidy_separators(resolved)
             if not resolved and block['type'] in ('text', 'qr', 'barcode'):
                 continue
             block['value'] = resolved
@@ -447,6 +573,9 @@ def fill(template, context):
 
 def sample_context(kind, overrides=None):
     context = dict(placeholders(kind))
+    # Sample rows for anything a `list` block can repeat over, so the Studio
+    # previews a digest with entries in it rather than an empty stretch.
+    context.update(list_sources(kind))
     if overrides:
         context.update({k: v for k, v in overrides.items() if v is not None})
     return context

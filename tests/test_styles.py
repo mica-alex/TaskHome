@@ -271,3 +271,95 @@ def test_a_receipt_with_media_still_shows_it():
     template = styles.get_template('scf', 'scf-default')
     blocks = styles.fill(template, styles.sample_context('scf', {'media': 'Photo'}))
     assert 'Photo' in '\n'.join(receipt.render_text(blocks))
+
+
+# --- list blocks: the one thing a flat template cannot express ----------------
+#
+# A digest's length is not known when the template is written, so ten headlines
+# each with their own QR cannot be a fixed run of blocks. A `list` block repeats
+# over a source in the context and expands, at fill time, into ordinary text and
+# qr blocks -- receipt.py never learns that repetition exists, which is what
+# keeps the preview and the paper on one code path.
+
+def list_block(**overrides):
+    block = {'type': 'list', 'source': 'entries',
+             'value': '{item_index}. {item_title}', 'qr_value': '{item_link}',
+             'font': 'b', 'align': 'left', 'size': 3, 'gap': 0}
+    block.update(overrides)
+    return block
+
+
+ROWS = [{'item_index': '1', 'item_title': 'First', 'item_link': 'https://example.com/1'},
+        {'item_index': '2', 'item_title': 'Second', 'item_link': 'https://example.com/2'}]
+
+
+def test_a_list_block_expands_to_one_group_per_row():
+    blocks = styles.fill(template(kind='feeds', blocks=[list_block()]),
+                         {'entries': ROWS})
+    assert [b['type'] for b in blocks] == ['text', 'qr', 'text', 'qr']
+    assert [b['value'] for b in blocks] == [
+        '1. First', 'https://example.com/1', '2. Second', 'https://example.com/2']
+
+
+def test_a_list_block_over_nothing_leaves_nothing():
+    """A digest that came out empty should not print a header and a hole."""
+    assert styles.fill(template(kind='feeds', blocks=[list_block()]),
+                       {'entries': []}) == []
+
+
+def test_a_row_without_a_link_gets_no_qr():
+    blocks = styles.fill(
+        template(kind='feeds', blocks=[list_block()]),
+        {'entries': [{'item_index': '1', 'item_title': 'First', 'item_link': ''}]})
+    assert [b['type'] for b in blocks] == ['text']
+
+
+def test_a_list_block_with_no_qr_value_prints_text_only():
+    blocks = styles.fill(template(kind='feeds', blocks=[list_block(qr_value='')]),
+                         {'entries': ROWS})
+    assert [b['type'] for b in blocks] == ['text', 'text']
+
+
+def test_spacing_goes_between_rows_and_not_after_the_last():
+    """A trailing gap is paper spent on nothing."""
+    blocks = styles.fill(template(kind='feeds', blocks=[list_block(gap=8)]),
+                         {'entries': ROWS})
+    assert [b['type'] for b in blocks] == ['text', 'qr', 'gap', 'text', 'qr']
+
+
+def test_a_list_block_can_read_the_receipt_wide_placeholders_too():
+    blocks = styles.fill(
+        template(kind='feeds', blocks=[list_block(value='{item_title} of {count}',
+                                                  qr_value='')]),
+        {'entries': ROWS[:1], 'count': '7'})
+    assert blocks[0]['value'] == 'First of 7'
+
+
+def test_an_unknown_repeating_source_is_refused():
+    with pytest.raises(styles.TemplateError):
+        styles.validate_template(
+            template(kind='feeds', blocks=[list_block(source='nonsense')]))
+
+
+def test_a_kind_with_nothing_to_repeat_cannot_use_a_list_block():
+    with pytest.raises(styles.TemplateError):
+        styles.validate_template(template(kind='task', blocks=[list_block()]))
+
+
+def test_an_unknown_item_placeholder_is_refused():
+    with pytest.raises(styles.TemplateError):
+        styles.validate_template(
+            template(kind='feeds', blocks=[list_block(value='{item_nonsense}')]))
+
+
+def test_a_list_block_keeps_its_fields_through_validation():
+    clean = styles.validate_template(
+        template(kind='feeds', blocks=[list_block(size=5, gap=12, bold=True)]))
+    block = clean['blocks'][0]
+    assert (block['size'], block['gap'], block['bold']) == (5, 12, True)
+
+
+def test_a_list_previews_without_a_context():
+    """The Studio has to show a digest with entries in it, not an empty stretch."""
+    out = styles.preview(template(kind='feeds', blocks=[list_block()]))
+    assert any(row['kind'] == 'qr' for row in out['rows'])

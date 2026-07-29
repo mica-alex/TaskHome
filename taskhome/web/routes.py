@@ -413,6 +413,10 @@ def receipt_studio():
         templates=styles.list_templates(kind),
         active=styles.active_template_name(kind),
         placeholders=sorted(styles.placeholders(kind)),
+        # Sources a `list` block can repeat over, with the item placeholders
+        # each one offers. Empty for most kinds; a digest has one.
+        list_sources={source: sorted(styles.item_placeholders(kind, source))
+                      for source in sorted(styles.list_sources(kind))},
         preview=styles.preview(template),
     )
 

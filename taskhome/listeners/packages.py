@@ -29,6 +29,8 @@ from .. import layouts, receipt
 from ..logsetup import log
 
 API = 'https://api.17track.net/track/v2.2'
+#: The public tracking page, which takes any carrier's number in the fragment.
+TRACK_URL = 'https://t.17track.net/en'
 TIMEOUT = 25
 MAX_TRACKED = 40
 
@@ -98,6 +100,7 @@ class PackageListener(base.Listener):
         'status': 'Out for delivery',
         'location': 'Manchester, NH',
         'detail': 'On vehicle for delivery',
+        'url': 'https://t.17track.net/en#nums=1Z999AA10123456784',
         'printed': '8:30 AM 7/27/26',
     }
 
@@ -288,6 +291,16 @@ class PackageListener(base.Listener):
     def describe(self, item):
         return f"{item['carrier']} {item['number'][-6:]}: {item['status']}"
 
+    def tracking_url(self, number):
+        """The 17TRACK page for a parcel.
+
+        Carrier-neutral on purpose: the whole point of tracking through 17TRACK
+        is that the carrier may be anything, and a per-carrier URL table would
+        be wrong for exactly the parcels that are hardest to look up by hand.
+        """
+        number = (number or '').strip()
+        return f'{TRACK_URL}#nums={number}' if number else ''
+
     def context(self, item):
         return {
             'number': item.get('number', ''),
@@ -295,11 +308,15 @@ class PackageListener(base.Listener):
             'status': item.get('status', ''),
             'location': item.get('location', ''),
             'detail': item.get('detail', ''),
+            'url': self.tracking_url(item.get('number')),
             'printed': layouts._stamp(),
         }
 
-    def blocks_from_context(self, context):
-        blocks = [
+    def blocks_from_context(self, context, qr=True):
+        blocks = []
+        if qr and context.get('url'):
+            blocks.append(receipt.qr(context['url'], size=4))
+        blocks += [
             receipt.text(context['status'], font='a', width=2, height=2, bold=True),
             receipt.gap(6),
             receipt.text(context['carrier'], font='b', bold=True),
@@ -318,7 +335,10 @@ class PackageListener(base.Listener):
 
     def template_presets(self):
         markers = {key: '{%s}' % key for key in self.PLACEHOLDERS}
-        return [(f'{self.name}-default', self.blocks_from_context(markers))]
+        return [
+            (f'{self.name}-default', self.blocks_from_context(markers, qr=True)),
+            (f'{self.name}-compact', self.blocks_from_context(markers, qr=False)),
+        ]
 
     def history_record(self, item):
         return {
@@ -327,6 +347,7 @@ class PackageListener(base.Listener):
             'category': item.get('carrier', 'Parcel'),
             'title': f"{item.get('status')} - {item.get('number')}",
             'description': item.get('detail', '')[:500],
+            'url': self.tracking_url(item.get('number')),
             'print_time': datetime.now().isoformat(),
         }
 

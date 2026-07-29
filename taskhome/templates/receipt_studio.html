@@ -55,6 +55,10 @@
       <button type="button" class="mica-btn mica-btn-secondary" data-add="gap">+ Space</button>
       <button type="button" class="mica-btn mica-btn-secondary" data-add="qr">+ QR</button>
       <button type="button" class="mica-btn mica-btn-secondary" data-add="barcode">+ Barcode</button>
+      {# Only offered where there is something to repeat over. #}
+      {% if list_sources %}
+        <button type="button" class="mica-btn mica-btn-secondary" data-add="list">+ List</button>
+      {% endif %}
     </div>
 
     <details class="studio-placeholders">
@@ -63,6 +67,16 @@
       {% for name in placeholders %}
         <button type="button" class="mica-chip mica-chip-muted"
                 data-placeholder="{{ name }}">{{ '{' ~ name ~ '}' }}</button>
+      {% endfor %}
+      {% for source, names in list_sources.items() %}
+        <p class="mica-help">
+          Inside a list block over <strong>{{ source }}</strong>, one set of
+          blocks is printed per item:
+        </p>
+        {% for name in names %}
+          <button type="button" class="mica-chip mica-chip-muted"
+                  data-placeholder="{{ name }}">{{ '{' ~ name ~ '}' }}</button>
+        {% endfor %}
       {% endfor %}
     </details>
   </div>
@@ -103,5 +117,6 @@
 </div>
 
 <script id="template-data" type="application/json">{{ template | tojson }}</script>
+<script id="list-sources" type="application/json">{{ list_sources | tojson }}</script>
 <script src="{{ url_for('static', filename='studio.js') }}"></script>
 {% endblock %}
